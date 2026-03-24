@@ -453,7 +453,13 @@ public class DiscoveryService : IService
                 pluginOptions.BulbConfigJson = JsonSerializer.Serialize(request.Bulbs, JsonOptions);
 
             if (request.MappingProfiles != null)
+            {
                 pluginOptions.MappingProfilesJson = JsonSerializer.Serialize(request.MappingProfiles, JsonOptions);
+                // Auto-activate the first profile if the current active profile no longer exists
+                var profileNames = request.MappingProfiles.Select(p => p.Name).ToList();
+                if (profileNames.Count > 0 && !profileNames.Contains(pluginOptions.ActiveProfileName))
+                    pluginOptions.ActiveProfileName = profileNames[0];
+            }
 
             Plugin.Instance!.SavePluginOptions(pluginOptions);
 

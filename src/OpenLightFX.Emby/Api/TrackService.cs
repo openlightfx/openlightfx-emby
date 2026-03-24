@@ -19,9 +19,24 @@ public class GetStatus : IReturn<PluginStatusResponse> { }
 public class GetSettings : IReturn<SettingsResponse> { }
 
 [Route("/OpenLightFX/Settings", "PUT", Description = "Partial update plugin settings")]
-public class UpdateSettings : IReturn<SettingsResponse>, IRequiresRequestStream
+public class UpdateSettings : IReturn<SettingsResponse>
 {
-    public Stream RequestStream { get; set; } = Stream.Null;
+    public string? BulbConfigJson { get; set; }
+    public string? MappingProfilesJson { get; set; }
+    public string? ActiveProfileName { get; set; }
+    public string? DeviceProfileOverridesJson { get; set; }
+    public int? GlobalTimeOffsetMs { get; set; }
+    public int? GlobalBrightnessCap { get; set; }
+    public int? LookaheadBufferMs { get; set; }
+    public int? PollIntervalMs { get; set; }
+    public string? StartBehaviorOverride { get; set; }
+    public string? EndBehaviorOverride { get; set; }
+    public string? CreditsBehaviorOverride { get; set; }
+    public bool? PreShowEnabled { get; set; }
+    public bool? PhotosensitivityMode { get; set; }
+    public bool? ShowFlashingWarnings { get; set; }
+    public string? AdditionalScanPaths { get; set; }
+    public string? PluginLogLevel { get; set; }
 }
 
 [Route("/OpenLightFX/Tracks/ByItem", "GET", Description = "Get available .lightfx tracks for a media item")]
@@ -286,66 +301,61 @@ public class TrackService : IService
     {
         try
         {
-            using var reader = new StreamReader(request.RequestStream);
-            var body = reader.ReadToEnd();
-            using var doc = JsonDocument.Parse(body);
-            var root = doc.RootElement;
-
             Plugin.Instance!.UpdateOptions(options =>
             {
-                if (root.TryGetProperty("bulbConfigJson", out var v))
-                    options.BulbConfigJson = v.GetString() ?? "[]";
+                if (request.BulbConfigJson != null)
+                    options.BulbConfigJson = request.BulbConfigJson;
 
-                if (root.TryGetProperty("mappingProfilesJson", out v))
-                    options.MappingProfilesJson = v.GetString() ?? "[]";
+                if (request.MappingProfilesJson != null)
+                    options.MappingProfilesJson = request.MappingProfilesJson;
 
-                if (root.TryGetProperty("activeProfileName", out v))
-                    options.ActiveProfileName = v.GetString() ?? "Default";
+                if (request.ActiveProfileName != null)
+                    options.ActiveProfileName = request.ActiveProfileName;
 
-                if (root.TryGetProperty("deviceProfileOverridesJson", out v))
-                    options.DeviceProfileOverridesJson = v.GetString() ?? "{}";
+                if (request.DeviceProfileOverridesJson != null)
+                    options.DeviceProfileOverridesJson = request.DeviceProfileOverridesJson;
 
-                if (root.TryGetProperty("globalTimeOffsetMs", out v))
-                    options.GlobalTimeOffsetMs = v.GetInt32();
+                if (request.GlobalTimeOffsetMs.HasValue)
+                    options.GlobalTimeOffsetMs = request.GlobalTimeOffsetMs.Value;
 
-                if (root.TryGetProperty("globalBrightnessCap", out v))
+                if (request.GlobalBrightnessCap.HasValue)
                 {
-                    var cap = v.GetInt32();
+                    var cap = request.GlobalBrightnessCap.Value;
                     if (cap < 0 || cap > 100)
                         throw new ArgumentOutOfRangeException(nameof(options.GlobalBrightnessCap),
                             "globalBrightnessCap must be between 0 and 100");
                     options.GlobalBrightnessCap = cap;
                 }
 
-                if (root.TryGetProperty("lookaheadBufferMs", out v))
-                    options.LookaheadBufferMs = v.GetInt32();
+                if (request.LookaheadBufferMs.HasValue)
+                    options.LookaheadBufferMs = request.LookaheadBufferMs.Value;
 
-                if (root.TryGetProperty("pollIntervalMs", out v))
-                    options.PollIntervalMs = v.GetInt32();
+                if (request.PollIntervalMs.HasValue)
+                    options.PollIntervalMs = request.PollIntervalMs.Value;
 
-                if (root.TryGetProperty("startBehaviorOverride", out v))
-                    options.StartBehaviorOverride = Enum.Parse<BehaviorOverride>(v.GetString() ?? "UseTrackDefault", true);
+                if (request.StartBehaviorOverride != null)
+                    options.StartBehaviorOverride = Enum.Parse<BehaviorOverride>(request.StartBehaviorOverride, true);
 
-                if (root.TryGetProperty("endBehaviorOverride", out v))
-                    options.EndBehaviorOverride = Enum.Parse<BehaviorOverride>(v.GetString() ?? "UseTrackDefault", true);
+                if (request.EndBehaviorOverride != null)
+                    options.EndBehaviorOverride = Enum.Parse<BehaviorOverride>(request.EndBehaviorOverride, true);
 
-                if (root.TryGetProperty("creditsBehaviorOverride", out v))
-                    options.CreditsBehaviorOverride = Enum.Parse<CreditsBehaviorOverride>(v.GetString() ?? "UseTrackDefault", true);
+                if (request.CreditsBehaviorOverride != null)
+                    options.CreditsBehaviorOverride = Enum.Parse<CreditsBehaviorOverride>(request.CreditsBehaviorOverride, true);
 
-                if (root.TryGetProperty("preShowEnabled", out v))
-                    options.PreShowEnabled = v.GetBoolean();
+                if (request.PreShowEnabled.HasValue)
+                    options.PreShowEnabled = request.PreShowEnabled.Value;
 
-                if (root.TryGetProperty("photosensitivityMode", out v))
-                    options.PhotosensitivityMode = v.GetBoolean();
+                if (request.PhotosensitivityMode.HasValue)
+                    options.PhotosensitivityMode = request.PhotosensitivityMode.Value;
 
-                if (root.TryGetProperty("showFlashingWarnings", out v))
-                    options.ShowFlashingWarnings = v.GetBoolean();
+                if (request.ShowFlashingWarnings.HasValue)
+                    options.ShowFlashingWarnings = request.ShowFlashingWarnings.Value;
 
-                if (root.TryGetProperty("additionalScanPaths", out v))
-                    options.AdditionalScanPaths = v.GetString() ?? "";
+                if (request.AdditionalScanPaths != null)
+                    options.AdditionalScanPaths = request.AdditionalScanPaths;
 
-                if (root.TryGetProperty("pluginLogLevel", out v))
-                    options.PluginLogLevel = Enum.Parse<PluginLogLevel>(v.GetString() ?? "Info", true);
+                if (request.PluginLogLevel != null)
+                    options.PluginLogLevel = Enum.Parse<PluginLogLevel>(request.PluginLogLevel, true);
             });
 
             var updated = Plugin.Instance.GetPluginOptions();
