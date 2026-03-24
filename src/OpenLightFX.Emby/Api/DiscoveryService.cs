@@ -53,11 +53,14 @@ public class GetHueLightsRequest : IReturn<HueLightsResponse>
     public string Username { get; set; } = "";
 }
 
-[Route("/OpenLightFX/Discover/SaveConfig", "POST", Description = "Save a discovered bulb as a configured bulb")]
+[Route("/OpenLightFX/Discover/SaveConfig", "POST", Description = "Bulk-replace bulb config and mapping profiles from onboarding wizard")]
 public class SaveDiscoveredBulbConfigRequest : IReturn<SaveDiscoveredBulbConfigResponse>
 {
-    public string BulbId { get; set; } = "";
-    public BulbConfig? Config { get; set; }
+    /// <summary>Full replacement list of bulbs to store in BulbConfigJson.</summary>
+    public List<BulbConfig>? Bulbs { get; set; }
+
+    /// <summary>Full replacement list of mapping profiles to store in MappingProfilesJson.</summary>
+    public List<MappingProfile>? MappingProfiles { get; set; }
 }
 
 // ─── Response DTOs ───────────────────────────────────────────────────
@@ -442,34 +445,23 @@ public class DiscoveryService : IService
             if (entry == null)
                 return new SaveDiscoveredBulbConfigResponse { Success = false, Error = "Plugin not initialized" };
 
-            if (request.Config == null)
-                return new SaveDiscoveredBulbConfigResponse { Success = false, Error = "config is required" };
-
-            var options = entry.GetOptions();
-            var bulbs = entry.ConfigService.ParseBulbConfig(options.BulbConfigJson);
-
-            // Replace existing bulb with same Id, or add new
-            var existing = bulbs.FindIndex(b =>
-                string.Equals(b.Id, request.Config.Id, StringComparison.OrdinalIgnoreCase));
-            if (existing >= 0)
-                bulbs[existing] = request.Config;
-            else
-                bulbs.Add(request.Config);
-
-            var updatedJson = JsonSerializer.Serialize(bulbs, JsonOptions);
-
-            // Update plugin options
             var pluginOptions = Plugin.Instance?.GetPluginOptions();
-            if (pluginOptions != null)
-            {
-                pluginOptions.BulbConfigJson = updatedJson;
-                Plugin.Instance!.SavePluginOptions(pluginOptions);
-            }
+            if (pluginOptions == null)
+                return new SaveDiscoveredBulbConfigResponse { Success = false, Error = "Plugin options not available" };
 
+            if (request.Bulbs != null)
+                pluginOptions.BulbConfigJson = JsonSerializer.Serialize(request.Bulbs, JsonOptions);
+
+            if (request.MappingProfiles != null)
+                pluginOptions.MappingProfilesJson = JsonSerializer.Serialize(request.MappingProfiles, JsonOptions);
+
+            Plugin.Instance!.SavePluginOptions(pluginOptions);
+
+            var bulbCount = entry.ConfigService.ParseBulbConfig(pluginOptions.BulbConfigJson).Count;
             return new SaveDiscoveredBulbConfigResponse
             {
                 Success = true,
-                ConfiguredBulbCount = bulbs.Count
+                ConfiguredBulbCount = bulbCount
             };
         }
         catch (Exception ex)
