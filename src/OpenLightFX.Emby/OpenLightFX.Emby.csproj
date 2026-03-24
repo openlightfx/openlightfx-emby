@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>OpenLightFX.Emby</RootNamespace>
+    <AssemblyName>OpenLightFX.Emby</AssemblyName>
+    <Version>1.0.0</Version>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <!-- Emby SDK References -->
+  <ItemGroup>
+    <Reference Include="MediaBrowser.Common">
+      <HintPath>../../lib/MediaBrowser.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MediaBrowser.Controller">
+      <HintPath>../../lib/MediaBrowser.Controller.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MediaBrowser.Model">
+      <HintPath>../../lib/MediaBrowser.Model.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Emby.Web.GenericEdit">
+      <HintPath>../../lib/Emby.Web.GenericEdit.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- NuGet Packages -->
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.29.*" />
+    <PackageReference Include="Grpc.Tools" Version="2.70.*" PrivateAssets="All" />
+  </ItemGroup>
+
+  <!-- Protobuf Compilation -->
+  <ItemGroup>
+    <Protobuf Include="Proto/lightfx.proto" GrpcServices="None" />
+  </ItemGroup>
+
+</Project>

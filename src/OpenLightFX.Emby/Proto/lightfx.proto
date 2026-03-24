@@ -1,0 +1,324 @@
+syntax = "proto3";
+package openlightfx;
+
+// ============================================================
+// LightFXTrack — root message for a .lightfx track file
+// Format version: 1
+// Spec: requirements/track-format-spec.md
+// ============================================================
+
+message LightFXTrack {
+  // Schema version for this track (e.g., 1)
+  uint32 version = 1;
+
+  // Track metadata (includes settings that were previously in TrackSettings)
+  TrackMetadata metadata = 2;
+
+  // Ordered list of channel definitions
+  repeated Channel channels = 3;
+
+  // Keyframes — top-level, referencing channels by channel_id
+  repeated Keyframe keyframes = 5;
+
+  // Effect keyframes — separate from regular keyframes
+  repeated EffectKeyframe effect_keyframes = 6;
+
+  // Safety metadata
+  SafetyInfo safety_info = 8;
+}
+
+// ============================================================
+// TrackMetadata
+// ============================================================
+
+message TrackMetadata {
+  // Human-readable track title (e.g., "Blade Runner 2049 — Immersive Theater Pack")
+  string title = 1;
+
+  // Track description / notes from the author
+  string description = 2;
+
+  // Target movie identification
+  MovieReference movie_reference = 3;
+
+  // Author display name
+  string author = 4;
+
+  // Tags for discovery (e.g., ["sci-fi", "immersive", "subtle"])
+  repeated string tags = 5;
+
+  // Track duration in milliseconds (should match or approximate movie runtime)
+  uint64 duration_ms = 6;
+
+  // Behavior when playback starts
+  BoundaryBehavior start_behavior = 7;
+
+  // Behavior when playback ends or is stopped
+  BoundaryBehavior end_behavior = 8;
+
+  // How many milliseconds before movie start to begin the pre-show transition.
+  // If 0 or unset, no pre-show sequence is performed.
+  uint32 preshow_duration_ms = 9;
+
+  // Bulb state to transition to during the pre-show sequence.
+  // Ignored if preshow_duration_ms is 0.
+  PreshowState preshow_state = 10;
+
+  // Timestamp (ms from movie start) at which credits begin.
+  // If 0 or unset, no credits handling is applied.
+  uint64 credits_start_ms = 11;
+
+  // How the plugin behaves once credits_start_ms is reached.
+  CreditsBehavior credits_behavior = 12;
+
+  // Author-assigned version label for this track file (e.g., "1.0", "2.1-beta").
+  // Informational only — not parsed by playback engines. Independent of the Marketplace
+  // version history, which is managed server-side.
+  string track_version = 13;
+}
+
+message MovieReference {
+  // IMDB ID (e.g., "tt1856101") — primary identifier
+  string imdb_id = 1;
+
+  // Human-readable movie title (for display when IMDB lookup isn't available)
+  string title = 2;
+
+  // Release year
+  uint32 year = 3;
+
+  // Expected runtime in minutes
+  uint32 runtime_minutes = 4;
+}
+
+enum BoundaryBehavior {
+  BOUNDARY_UNSPECIFIED = 0;
+  LEAVE = 1;  // Leave bulbs in their current state (no change)
+  OFF = 2;    // Turn all bulbs off
+  ON = 3;     // Set all bulbs to white at 100% brightness
+}
+
+enum PreshowState {
+  PRESHOW_UNSPECIFIED = 0;
+  PRESHOW_DIM = 1;   // Dim all bulbs to a low level (≈10%)
+  PRESHOW_OFF = 2;   // Turn all bulbs off
+  PRESHOW_WARM = 3;  // Transition to a warm white at reduced brightness
+}
+
+enum CreditsBehavior {
+  CREDITS_UNSPECIFIED = 0;
+  CREDITS_CONTINUE = 1;  // Play keyframes through credits normally (default)
+  CREDITS_DIM_UP = 2;    // Gradually raise all channels to ~50% brightness over 5s
+  CREDITS_RAISE = 3;     // Raise all channels to full brightness immediately
+  CREDITS_OFF = 4;       // Turn all bulbs off at credits start
+}
+
+enum IntensityRating {
+  INTENSITY_UNSPECIFIED = 0;
+  SUBTLE = 1;    // Gentle ambient changes, scene-level transitions
+  MODERATE = 2;  // Noticeable transitions, some effects
+  INTENSE = 3;   // Frequent changes, flashbangs, strobes
+  EXTREME = 4;   // Continuous rapid changes, maximum effect density
+}
+
+// ============================================================
+// Channel
+// ============================================================
+
+// A named lighting zone. Keyframes reference channels by id from the
+// top-level keyframes list. spatial_hint is a string matching the
+// canonical SPATIAL_* names to allow extension without schema changes.
+//
+// Recognized spatial_hint values:
+//   SPATIAL_UNSPECIFIED, SPATIAL_LEFT, SPATIAL_RIGHT, SPATIAL_CENTER,
+//   SPATIAL_SURROUND_LEFT, SPATIAL_SURROUND_RIGHT, SPATIAL_CEILING,
+//   SPATIAL_FLOOR, SPATIAL_BEHIND_SCREEN, SPATIAL_AMBIENT
+message Channel {
+  // Channel identifier, unique within the track (e.g., "left", "right", "ambiance")
+  string id = 1;
+
+  // Human-readable display name (e.g., "Left Wall", "Ambient Backlight")
+  string display_name = 2;
+
+  // Optional description of this channel's intended purpose
+  string description = 3;
+
+  // Suggested default color for this channel when no keyframes are active
+  RGBColor default_color = 4;
+
+  // Suggested default brightness (0-100) when no keyframes are active
+  uint32 default_brightness = 5;
+
+  // Suggested spatial position for auto-mapping UIs (string, e.g., "SPATIAL_LEFT")
+  string spatial_hint = 6;
+
+  // Whether this channel is optional (playback should still work if unmapped)
+  bool optional = 8;
+}
+
+// ============================================================
+// Keyframes
+// ============================================================
+
+message RGBColor {
+  uint32 r = 1;  // 0-255
+  uint32 g = 2;  // 0-255
+  uint32 b = 3;  // 0-255
+}
+
+enum ColorMode {
+  COLOR_MODE_UNSPECIFIED = 0;
+  RGB = 1;
+  COLOR_TEMPERATURE = 2;
+}
+
+enum InterpolationMode {
+  INTERPOLATION_UNSPECIFIED = 0;
+  STEP = 1;    // Instant snap at the start of the transition (no intermediate commands)
+  LINEAR = 2;  // Linear transition — plugin sends incremental commands at a fixed rate
+}
+
+message Keyframe {
+  // Unique keyframe identifier
+  string id = 1;
+
+  // Which channel this keyframe belongs to
+  string channel_id = 2;
+
+  // Timestamp in milliseconds from the start of the movie
+  uint64 timestamp_ms = 3;
+
+  // Color mode (RGB or COLOR_TEMPERATURE)
+  ColorMode color_mode = 4;
+
+  // Target RGB color (when color_mode = RGB)
+  RGBColor color = 5;
+
+  // Target color temperature in Kelvin (when color_mode = COLOR_TEMPERATURE)
+  uint32 color_temperature = 6;
+
+  // Target brightness (0-100)
+  uint32 brightness = 7;
+
+  // Transition duration in milliseconds
+  uint32 transition_ms = 8;
+
+  // Interpolation mode for the transition TO this keyframe
+  InterpolationMode interpolation = 9;
+
+  // Power state — true ensures the bulb is on; false turns it off.
+  // When not explicitly set (default false), does not change the bulb's power state.
+  bool power_on = 10;
+}
+
+// ============================================================
+// Effect Keyframes
+// ============================================================
+
+enum EffectType {
+  EFFECT_UNSPECIFIED = 0;
+  LIGHTNING = 1;   // Rapid bright white flash(es) with afterglow decay
+  FLAME = 2;       // Flickering warm colors simulating fire
+  FLASHBANG = 3;   // Intense white flash followed by slow fade
+  EXPLOSION = 4;   // Rapid orange/red burst with slow decay
+  PULSE = 5;       // Rhythmic brightness oscillation
+  STROBE = 6;      // Rapid on/off flashing
+  SIREN = 7;       // Alternating red/blue (or configurable colors)
+  AURORA = 8;      // Slow-shifting multi-color ambient wash
+  CANDLE = 9;      // Subtle warm flicker (gentler than flame)
+  GUNFIRE = 10;    // Brief sharp white/yellow flashes
+  NEON = 11;       // Rapid color-saturated flicker (neon sign)
+  BREATHING = 12;  // Slow sinusoidal brightness oscillation
+  SPARK = 13;      // Very brief single flash
+}
+
+// Flexible key-value parameter map for effect-specific settings.
+// All keys use snake_case. Unknown keys are ignored. Keys are case-sensitive.
+//
+// Canonical keys, value ranges, defaults, and applicable effect types:
+//
+// Key               | Type    | Range          | Default | Applies to
+// ------------------|---------|----------------|---------|------------------------------------------
+// flash_count       | integer | 1–20           | (note)  | LIGHTNING, FLASHBANG, EXPLOSION, GUNFIRE, SIREN, STROBE
+// flicker_rate_hz   | float   | 0.5–30.0       | (note)  | FLAME, CANDLE, NEON, AURORA
+// pulse_rate_hz     | float   | 0.1–5.0        | 1.0     | PULSE, BREATHING
+// decay_ms          | integer | 0–5000         | 500     | EXPLOSION, LIGHTNING, GUNFIRE
+// randomness        | float   | 0.0–1.0        | 0.5     | FLAME, CANDLE, AURORA, NEON, SPARK
+//
+// Effect-type-specific defaults for flash_count and flicker_rate_hz:
+//   LIGHTNING: flash_count=2, FLASHBANG: flash_count=1, EXPLOSION: flash_count=3
+//   GUNFIRE: flash_count=4, SIREN: flash_count=8 (cycles), STROBE: flash_count=10
+//   FLAME: flicker_rate_hz=8.0, CANDLE: flicker_rate_hz=3.0, NEON: flicker_rate_hz=15.0, AURORA: flicker_rate_hz=0.5
+message EffectParams {
+  map<string, double> params = 1;
+}
+
+// A parameterized lighting effect that the playback engine expands at runtime.
+//
+// required_capability recognized values:
+//   CAPABILITY_ANY          — any bulb (default if field is empty)
+//   CAPABILITY_RGB          — bulb must support full RGB color
+//   CAPABILITY_FAST_TRANSITION — bulb must have min_transition_ms ≤ 100ms
+//   CAPABILITY_FAST_RGB     — bulb must support both full RGB and fast transitions
+message EffectKeyframe {
+  // Unique identifier
+  string id = 1;
+
+  // Which channel this effect belongs to
+  string channel_id = 2;
+
+  // Timestamp in milliseconds
+  uint64 timestamp_ms = 3;
+
+  // Effect duration in milliseconds
+  uint64 duration_ms = 4;
+
+  // Effect type
+  EffectType effect_type = 5;
+
+  // Intensity (0-100), controls how dramatic the effect is
+  uint32 intensity = 6;
+
+  // Primary color bias for the effect
+  RGBColor primary_color = 7;
+
+  // Secondary color
+  RGBColor secondary_color = 8;
+
+  // Effect-specific parameters (flexible key-value map)
+  EffectParams effect_params = 9;
+
+  // Minimum bulb capability required (see recognized values above).
+  // If empty or unset, treated as CAPABILITY_ANY.
+  string required_capability = 10;
+
+  // Fallback color if the bulb can't render this effect
+  RGBColor fallback_color = 11;
+
+  // Fallback brightness (0-100)
+  uint32 fallback_brightness = 12;
+}
+
+// ============================================================
+// Safety Information
+// ============================================================
+
+message SafetyInfo {
+  // Does this track contain rapid flashing (>3 Hz)?
+  bool contains_flashing = 1;
+
+  // Does this track contain strobing effects?
+  bool contains_strobing = 2;
+
+  // Maximum flash frequency in Hz across the entire track
+  double max_flash_frequency_hz = 3;
+
+  // The highest instantaneous brightness delta (0-100) in the track
+  uint32 max_brightness_delta = 4;
+
+  // Human-readable safety warning (optional, for display in player/marketplace)
+  string warning_text = 5;
+
+  // Overall intensity rating for this track
+  IntensityRating intensity_rating = 6;
+}

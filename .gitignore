@@ -1,0 +1,10 @@
+bin/
+obj/
+lib/*.dll
+lib/*.xml
+.vs/
+*.user
+*.suo
+*.DotSettings
+*.nupkg
+.idea/
