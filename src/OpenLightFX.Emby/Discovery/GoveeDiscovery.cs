@@ -17,12 +17,15 @@ public class GoveeDiscovery : IDiscoveryModule
     {
         var bulbs = new List<DiscoveredBulb>();
 
-        using var client = new UdpClient(ListenPort);
+        using var client = new UdpClient();
+        client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        client.Client.Bind(new IPEndPoint(IPAddress.Any, ListenPort));
         client.JoinMulticastGroup(IPAddress.Parse(MulticastAddress));
         client.Client.ReceiveTimeout = timeoutMs;
 
         var target = new IPEndPoint(IPAddress.Parse(MulticastAddress), SendPort);
-        var payload = Encoding.UTF8.GetBytes("{\"msg\":{\"cmd\":\"scan\",\"data\":{}}}");
+        // Official Govee LAN API requires account_topic:reserve in scan data
+        var payload = Encoding.UTF8.GetBytes("{\"msg\":{\"cmd\":\"scan\",\"data\":{\"account_topic\":\"reserve\"}}}");
         await client.SendAsync(payload, payload.Length, target);
 
         var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);

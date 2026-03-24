@@ -45,10 +45,15 @@ public class DiscoveryCoordinator
     {
         try
         {
-            return await module.DiscoverAsync(timeoutMs, ct);
+            var results = await module.DiscoverAsync(timeoutMs, ct);
+            System.Diagnostics.Debug.WriteLine(
+                $"[OpenLightFX] {module.Protocol} discovery found {results.Count} bulb(s)");
+            return results;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine(
+                $"[OpenLightFX] {module.Protocol} discovery failed: {ex.Message}");
             return new List<DiscoveredBulb>();
         }
     }

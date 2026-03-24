@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>OpenLightFX.Emby</RootNamespace>
     <AssemblyName>OpenLightFX.Emby</AssemblyName>
-    <Version>1.0.0</Version>
+    <Version>1.0.2</Version>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
