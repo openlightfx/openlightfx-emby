@@ -31,15 +31,17 @@ public class ChannelManager
         foreach (var ch in track.Channels)
             _channels[ch.Id] = ch;
 
-        // Build reverse bulb-to-channel map; first channel listed in the profile wins (EMB-032)
+        // Build reverse bulb-to-channel map; first channel listed in the profile wins (EMB-032).
+        // Profile channelId is resolved against track channel id first, then display_name
+        // (case-insensitive), so human-readable names like "Left" work alongside UUIDs.
         foreach (var mapping in profile.Mappings)
         {
-            var channelId = mapping.ChannelId;
+            var resolvedId = ResolveChannelId(mapping.ChannelId);
             foreach (var bulbId in mapping.BulbIds)
             {
                 if (!_bulbToChannels.ContainsKey(bulbId))
                     _bulbToChannels[bulbId] = new();
-                _bulbToChannels[bulbId].Add(channelId);
+                _bulbToChannels[bulbId].Add(resolvedId);
             }
         }
 
@@ -105,6 +107,26 @@ public class ChannelManager
     /// Get all channel IDs in the track.
     /// </summary>
     public IEnumerable<string> GetChannelIds() => _channels.Keys;
+
+    /// <summary>
+    /// Resolve a profile channelId to a track channel id.
+    /// Matches by channel id first, then falls back to display_name (case-insensitive).
+    /// Returns the original value unchanged if no match is found.
+    /// </summary>
+    private string ResolveChannelId(string profileChannelId)
+    {
+        // Exact id match
+        if (_channels.ContainsKey(profileChannelId))
+            return profileChannelId;
+
+        // Display name match (case-insensitive)
+        var byName = _channels.Values.FirstOrDefault(ch =>
+            string.Equals(ch.DisplayName, profileChannelId, StringComparison.OrdinalIgnoreCase));
+        if (byName != null)
+            return byName.Id;
+
+        return profileChannelId; // unresolved — will produce no state match at dispatch time
+    }
 
     /// <summary>
     /// Auto-mapping suggestions based on spatial hints (EMB-036).
