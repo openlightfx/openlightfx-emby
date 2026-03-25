@@ -1,15 +1,18 @@
 namespace OpenLightFX.Emby.Services;
 
+using MediaBrowser.Model.Logging;
 using OpenLightFX.Emby.Models;
 
 public class TrackDiscoveryService
 {
     private readonly TrackParser _parser;
+    private readonly ILogger _logger;
     private readonly Dictionary<string, List<TrackInfo>> _cache = new();
 
-    public TrackDiscoveryService(TrackParser parser)
+    public TrackDiscoveryService(TrackParser parser, ILogger logger)
     {
         _parser = parser;
+        _logger = logger;
     }
 
     /// <summary>
@@ -28,6 +31,8 @@ public class TrackDiscoveryService
 
         var tracks = new List<TrackInfo>();
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var filesFound = 0;
+        var filesRejected = 0;
 
         // Strategy 1: Sidecar — .lightfx file alongside the movie with matching base name
         var dir = Path.GetDirectoryName(movieFilePath);
@@ -35,15 +40,30 @@ public class TrackDiscoveryService
         if (dir != null)
         {
             var sidecar = Path.Combine(dir, baseName + ".lightfx");
+            _logger.Debug("Discovery: checking sidecar '{0}'", sidecar);
             if (File.Exists(sidecar))
-                AddTrack(tracks, seenPaths, sidecar);
+            {
+                filesFound++;
+                if (!AddTrack(tracks, seenPaths, sidecar))
+                    filesRejected++;
+            }
         }
 
         // Strategy 1.5: Any .lightfx file in the same directory (catches Untitled_Track.lightfx etc.)
         if (dir != null)
         {
-            foreach (var file in Directory.GetFiles(dir, "*.lightfx"))
-                AddTrack(tracks, seenPaths, file); // seenPaths deduplicates the exact sidecar
+            try
+            {
+                foreach (var file in Directory.GetFiles(dir, "*.lightfx"))
+                {
+                    if (seenPaths.Contains(file)) continue;
+                    filesFound++;
+                    _logger.Debug("Discovery: found '{0}' in movie directory", Path.GetFileName(file));
+                    if (!AddTrack(tracks, seenPaths, file))
+                        filesRejected++;
+                }
+            }
+            catch (DirectoryNotFoundException) { }
         }
 
         // Strategy 2: Subfolder — all .lightfx files in a lightfx/ subdirectory
@@ -53,7 +73,12 @@ public class TrackDiscoveryService
             if (Directory.Exists(lightfxDir))
             {
                 foreach (var file in Directory.GetFiles(lightfxDir, "*.lightfx"))
-                    AddTrack(tracks, seenPaths, file);
+                {
+                    filesFound++;
+                    _logger.Debug("Discovery: found '{0}' in lightfx subfolder", Path.GetFileName(file));
+                    if (!AddTrack(tracks, seenPaths, file))
+                        filesRejected++;
+                }
             }
         }
 
@@ -79,6 +104,11 @@ public class TrackDiscoveryService
             }
         }
 
+        if (filesFound > 0 && tracks.Count == 0)
+            _logger.Warn("Discovery: found {0} .lightfx file(s) but all failed validation ({1} rejected)", filesFound, filesRejected);
+        else
+            _logger.Debug("Discovery: {0} file(s) found, {1} valid track(s), {2} rejected", filesFound, tracks.Count, filesRejected);
+
         _cache[cacheKey] = tracks;
         return tracks;
     }
@@ -98,12 +128,19 @@ public class TrackDiscoveryService
             _cache.Remove(key);
     }
 
-    private void AddTrack(List<TrackInfo> tracks, HashSet<string> seenPaths, string filePath)
+    private bool AddTrack(List<TrackInfo> tracks, HashSet<string> seenPaths, string filePath)
     {
-        if (!seenPaths.Add(filePath)) return;
+        if (!seenPaths.Add(filePath)) return true; // already added
 
         var info = _parser.Parse(filePath);
         if (info.IsValid)
+        {
             tracks.Add(info);
+            return true;
+        }
+
+        _logger.Warn("Discovery: '{0}' failed validation: {1}",
+            Path.GetFileName(filePath), string.Join("; ", info.ValidationErrors));
+        return false;
     }
 }

@@ -251,7 +251,7 @@ public class TrackService : IService
         _libraryManager = libraryManager;
         _logger = logManager.GetLogger("OpenLightFX.Api");
         _trackParser = new TrackParser();
-        _discoveryService = new TrackDiscoveryService(_trackParser);
+        _discoveryService = new TrackDiscoveryService(_trackParser, _logger);
         _configService = new ConfigurationService();
 
         var dataPath = Plugin.Instance?.DataFolderPath

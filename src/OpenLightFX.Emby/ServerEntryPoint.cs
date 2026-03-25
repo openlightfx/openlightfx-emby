@@ -64,7 +64,7 @@ public class ServerEntryPoint : IServerEntryPoint
         _logger = logManager.GetLogger("OpenLightFX");
 
         _trackParser = new TrackParser();
-        _trackDiscoveryService = new TrackDiscoveryService(_trackParser);
+        _trackDiscoveryService = new TrackDiscoveryService(_trackParser, _logger);
         _selectionService = new TrackSelectionService(appPaths.DataPath);
         _configService = new ConfigurationService();
         _effectFactory = new EffectRendererFactory();
