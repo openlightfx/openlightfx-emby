@@ -266,11 +266,20 @@ public class ServerEntryPoint : IServerEntryPoint
             var selectedPath = _selectionService.GetSelectedTrack(itemId, deviceId);
             if (selectedPath == null)
             {
-                // No selection at all — proceed without lighting (EMB-011)
-                _logger.Debug("No track selected for '{0}' (device={1}) — skipping lighting",
-                    item.Name, deviceId ?? "global");
-                _noTrackSessions.TryAdd(sessionId, true);
-                return;
+                if (tracks.Count == 1)
+                {
+                    // Only one track available — use it automatically
+                    _logger.Debug("Auto-selecting sole track '{0}' for '{1}'", tracks[0].FileName, item.Name);
+                    selectedPath = tracks[0].FilePath;
+                }
+                else
+                {
+                    // Multiple tracks, none selected — proceed without lighting (EMB-011)
+                    _logger.Debug("No track selected for '{0}' (device={1}) — skipping lighting",
+                        item.Name, deviceId ?? "global");
+                    _noTrackSessions.TryAdd(sessionId, true);
+                    return;
+                }
             }
 
             var trackInfo = tracks.FirstOrDefault(t => t.FilePath == selectedPath)
