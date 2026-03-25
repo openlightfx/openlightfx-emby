@@ -8,6 +8,7 @@ using OpenLightFX.Emby.Models;
 using OpenLightFX.Emby.Utilities;
 using Openlightfx;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 /// <summary>
 /// Manages a single playback-to-lighting session. Owns the state machine,
@@ -34,15 +35,30 @@ public class PlaybackSession
 
     // Playback state
     private PlaybackState _state = PlaybackState.Idle;
+    private bool _disposed;
+
+    // Real-time clock: last position synced from Emby + the wall-clock tick at that moment.
+    // Between progress events we extrapolate: currentPositionMs = _syncPositionMs + elapsed.
+    // Clock is NOT started until the first UpdatePosition() call from Emby.
+    private ulong _syncPositionMs;
+    private long _syncTimestampTicks;
+    private bool _clockStarted;
+
+    // Position as of the last Tick() call — used for seek detection and dispatch throttling
     private ulong _currentPositionMs;
     private ulong _lastDispatchedMs;
-    private bool _disposed;
 
     // Per-channel: index of last dispatched keyframe (for forward scanning)
     private readonly Dictionary<string, int> _channelKeyframeIndex = new();
 
-    // Active effect expansions: channelId → list of pending commands with absolute timestamps
-    private readonly Dictionary<string, List<(ulong absoluteMs, EffectCommand cmd)>> _activeEffects = new();
+    // Active effect expansions: channelId → list of effect windows with end times
+    private readonly Dictionary<string, List<EffectWindow>> _activeEffects = new();
+
+    // Tracks which effect keyframes have already been expanded (key: "{channelId}:{timestampMs}")
+    private readonly HashSet<string> _expandedEffects = new();
+
+    // Last-sent command per bulb — used to skip redundant dispatches when state is unchanged
+    private readonly Dictionary<string, BulbCommand> _lastSentCommands = new();
 
     public PlaybackSession(
         TrackInfo trackInfo,
@@ -105,6 +121,9 @@ public class PlaybackSession
         // instead of potentially-unset channel defaults
         ProcessKeyframes(0);
 
+        // Do NOT start the real-time clock here — Emby may still be buffering.
+        // The clock starts on the first UpdatePosition() call from Emby.
+
         // Dispatch the computed state directly — SetState includes "state":true
         // so bulbs power on with the correct color (no white flash from bare SetPower)
         await DispatchCurrentState();
@@ -137,18 +156,32 @@ public class PlaybackSession
         _logger.Debug("PlaybackSession stopped");
     }
 
-    /// <summary>Pause lighting — hold current state.</summary>
+    /// <summary>Pause lighting — freeze the real-time clock and hold current state.</summary>
     public void Pause()
     {
-        if (_state == PlaybackState.Playing)
-            _state = PlaybackState.Paused;
+        if (_state != PlaybackState.Playing) return;
+
+        // Snapshot the extrapolated position so the clock doesn't drift during pause
+        if (_clockStarted)
+        {
+            var elapsedMs = (ulong)((Stopwatch.GetTimestamp() - _syncTimestampTicks)
+                * 1000.0 / Stopwatch.Frequency);
+            _syncPositionMs += elapsedMs;
+            _clockStarted = false;
+        }
+
+        _state = PlaybackState.Paused;
     }
 
-    /// <summary>Resume lighting after pause.</summary>
+    /// <summary>Resume lighting after pause — re-anchor the real-time clock.</summary>
     public void Resume()
     {
-        if (_state == PlaybackState.Paused)
-            _state = PlaybackState.Playing;
+        if (_state != PlaybackState.Paused) return;
+
+        // Re-anchor the clock at the frozen position
+        _syncTimestampTicks = Stopwatch.GetTimestamp();
+        _clockStarted = true;
+        _state = PlaybackState.Playing;
     }
 
     /// <summary>Update the current playback position from Emby's progress events.</summary>
@@ -160,22 +193,60 @@ public class PlaybackSession
             ? positionMs + (ulong)offset
             : positionMs > (ulong)(-offset) ? positionMs - (ulong)(-offset) : 0;
 
-        // Detect seek (large position jump)
-        if (_state == PlaybackState.Playing || _state == PlaybackState.Paused)
+        // Compute our extrapolated position for comparison
+        var extrapolated = _syncPositionMs;
+        if (_clockStarted)
         {
-            var delta = adjusted > _currentPositionMs
-                ? adjusted - _currentPositionMs
-                : _currentPositionMs - adjusted;
+            var elapsedMs = (ulong)((Stopwatch.GetTimestamp() - _syncTimestampTicks)
+                * 1000.0 / Stopwatch.Frequency);
+            extrapolated += elapsedMs;
+        }
 
-            if (delta > 5000) // >5s jump = seek
+        if (_clockStarted && (_state == PlaybackState.Playing || _state == PlaybackState.Paused))
+        {
+            if (adjusted < extrapolated)
             {
-                _logger.Debug("Seek detected: {0}ms → {1}ms", _currentPositionMs, adjusted);
-                _channelKeyframeIndex.Clear();
-                _activeEffects.Clear();
+                // Emby is reporting a position BEHIND our clock
+                var backDelta = extrapolated - adjusted;
+                if (backDelta > 5000)
+                {
+                    // Large backward jump = seek
+                    _logger.Debug("Seek detected (backward): {0}ms → {1}ms", extrapolated, adjusted);
+                    _channelKeyframeIndex.Clear();
+                    _activeEffects.Clear();
+                    _expandedEffects.Clear();
+                    _lastSentCommands.Clear();
+                    _lastDispatchedMs = 0;
+                }
+                else
+                {
+                    // Small backward drift — Emby's event is stale, ignore it.
+                    // Our Stopwatch-based clock is more accurate for sub-second timing.
+                    return;
+                }
+            }
+            else
+            {
+                // Emby is ahead of or equal to our clock
+                var fwdDelta = adjusted - extrapolated;
+                if (fwdDelta > 5000)
+                {
+                    // Large forward jump = seek
+                    _logger.Debug("Seek detected (forward): {0}ms → {1}ms", extrapolated, adjusted);
+                    _channelKeyframeIndex.Clear();
+                    _activeEffects.Clear();
+                    _expandedEffects.Clear();
+                    _lastSentCommands.Clear();
+                    _lastDispatchedMs = 0;
+                }
+                // Small forward drift or exact match — accept the correction below
             }
         }
 
-        _currentPositionMs = adjusted;
+        // Sync the real-time clock to the reported position
+        _syncPositionMs = adjusted;
+        _syncTimestampTicks = Stopwatch.GetTimestamp();
+        _clockStarted = true;
 
         if (_state == PlaybackState.Paused)
             _state = PlaybackState.Playing;
@@ -186,14 +257,20 @@ public class PlaybackSession
     {
         if (_state != PlaybackState.Playing) return;
 
+        // Don't extrapolate until Emby has reported the first position
+        if (!_clockStarted) return;
+
         try
         {
-            // Process keyframes up to current position + lookahead
-            var lookahead = (ulong)Math.Max(_options.LookaheadBufferMs, 0);
+            // Extrapolate current position from the last Emby sync point
+            var elapsedMs = (ulong)((Stopwatch.GetTimestamp() - _syncTimestampTicks)
+                * 1000.0 / Stopwatch.Frequency);
+            _currentPositionMs = _syncPositionMs + elapsedMs;
+
             ProcessKeyframes(_currentPositionMs);
             ProcessEffects(_currentPositionMs);
 
-            // Dispatch to bulbs if enough time has elapsed
+            // Dispatch to bulbs if enough time has elapsed since last dispatch
             var minInterval = (ulong)Math.Max(_options.PollIntervalMs / 2, 50);
             if (_currentPositionMs - _lastDispatchedMs >= minInterval || _lastDispatchedMs == 0)
             {
@@ -232,18 +309,28 @@ public class PlaybackSession
     {
         foreach (var channelId in _channelManager.GetChannelIds())
         {
-            // Check for active effect commands
-            if (_activeEffects.TryGetValue(channelId, out var commands))
+            // Check for active effect windows
+            if (_activeEffects.TryGetValue(channelId, out var windows))
             {
-                // Find the most recent command at or before current position
+                // Find the most recent command from a non-expired effect window
                 EffectCommand? activeCmd = null;
-                for (int i = commands.Count - 1; i >= 0; i--)
+                foreach (var window in windows)
                 {
-                    if (commands[i].absoluteMs <= positionMs)
+                    // Skip this window if the effect's duration has elapsed
+                    if (positionMs > window.EffectEndMs)
+                        continue;
+
+                    // Search backward for the most recent command at or before position
+                    for (int i = window.Commands.Count - 1; i >= 0; i--)
                     {
-                        activeCmd = commands[i].cmd;
-                        break;
+                        if (window.Commands[i].absoluteMs <= positionMs)
+                        {
+                            activeCmd = window.Commands[i].cmd;
+                            break;
+                        }
                     }
+
+                    if (activeCmd != null) break;
                 }
 
                 if (activeCmd != null)
@@ -254,9 +341,9 @@ public class PlaybackSession
                     _channelManager.SetChannelState(channelId, state);
                 }
 
-                // Clean up expired commands
-                commands.RemoveAll(c => c.absoluteMs + 5000 < positionMs);
-                if (commands.Count == 0)
+                // Clean up expired effect windows (1s grace period after end)
+                windows.RemoveAll(w => w.EffectEndMs + 1000 < positionMs);
+                if (windows.Count == 0)
                     _activeEffects.Remove(channelId);
             }
 
@@ -270,7 +357,8 @@ public class PlaybackSession
                     continue;
 
                 var key = $"{channelId}:{efx.TimestampMs}";
-                if (_activeEffects.ContainsKey(key)) continue; // already expanded
+                if (_expandedEffects.Contains(key)) continue; // already expanded
+                _expandedEffects.Add(key);
 
                 var renderer = _effectFactory.GetRenderer(efx.EffectType);
                 if (renderer == null) continue;
@@ -289,9 +377,13 @@ public class PlaybackSession
                 var absoluteCmds = cmds.Select(c =>
                     (absoluteMs: efx.TimestampMs + c.OffsetMs, cmd: c)).ToList();
 
+                var window = new EffectWindow(
+                    efx.TimestampMs + efx.DurationMs,
+                    absoluteCmds);
+
                 if (!_activeEffects.ContainsKey(channelId))
                     _activeEffects[channelId] = new();
-                _activeEffects[channelId].AddRange(absoluteCmds);
+                _activeEffects[channelId].Add(window);
             }
         }
     }
@@ -319,7 +411,12 @@ public class PlaybackSession
                 continue;
             }
 
+            // Skip dispatch if state is unchanged since last send
+            if (_lastSentCommands.TryGetValue(bulbId, out var last) && last == command)
+                continue;
+
             tasks.Add(DispatchToBulb(bulbId, driver, command));
+            _lastSentCommands[bulbId] = command;
         }
 
         if (tasks.Count > 0)
@@ -442,6 +539,11 @@ public class PlaybackSession
         return (prev, next);
     }
 }
+
+/// <summary>Groups an effect's rendered commands with its end time for lifetime tracking.</summary>
+internal record EffectWindow(
+    ulong EffectEndMs,
+    List<(ulong absoluteMs, EffectCommand cmd)> Commands);
 
 public enum PlaybackState
 {
