@@ -7,7 +7,16 @@ public class TrackDiscoveryService
 {
     private readonly TrackParser _parser;
     private readonly ILogger _logger;
-    private readonly Dictionary<string, List<TrackInfo>> _cache = new();
+    private readonly Dictionary<string, CacheEntry> _cache = new();
+
+    private sealed class CacheEntry
+    {
+        public required List<TrackInfo> Tracks { get; init; }
+        public required DateTime CachedAt { get; init; }
+    }
+
+    // Only cache successful results for 5 minutes; never cache empty/failed results
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
 
     public TrackDiscoveryService(TrackParser parser, ILogger logger)
     {
@@ -26,8 +35,10 @@ public class TrackDiscoveryService
     public List<TrackInfo> DiscoverTracks(string movieFilePath, string? imdbId, IEnumerable<string>? additionalScanPaths = null)
     {
         var cacheKey = movieFilePath + "|" + (imdbId ?? "");
-        if (_cache.TryGetValue(cacheKey, out var cached))
-            return cached;
+        if (_cache.TryGetValue(cacheKey, out var cached) &&
+            cached.Tracks.Count > 0 &&
+            DateTime.UtcNow - cached.CachedAt < CacheTtl)
+            return cached.Tracks;
 
         var tracks = new List<TrackInfo>();
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -109,7 +120,12 @@ public class TrackDiscoveryService
         else
             _logger.Debug("Discovery: {0} file(s) found, {1} valid track(s), {2} rejected", filesFound, tracks.Count, filesRejected);
 
-        _cache[cacheKey] = tracks;
+        // Only cache successful results; failed/empty results are retried on next playback
+        if (tracks.Count > 0)
+            _cache[cacheKey] = new CacheEntry { Tracks = tracks, CachedAt = DateTime.UtcNow };
+        else
+            _cache.Remove(cacheKey);
+
         return tracks;
     }
 
