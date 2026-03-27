@@ -20,6 +20,10 @@ internal class FrameAnalysisPipeline
 
     private volatile byte[]? _previousFrameRgb;
 
+    // Starts true; flipped to false on first batch if the tone-mapped chain produces 0 frames
+    // (indicates zscale is unavailable or rejects this file's color metadata).
+    private volatile bool _useToneMapping = true;
+
     public FrameAnalysisPipeline(PluginOptions options, ILogger logger)
     {
         _options = options;
@@ -42,8 +46,19 @@ internal class FrameAnalysisPipeline
         double durationSec = (endMs - startMs) / 1000.0;
         float fps = Math.Max(0.1f, _options.AiAnalysisRateFps);
 
-        var frames = ExtractFrames(videoPath, startSec, durationSec, fps);
+        var frames = ExtractFrames(videoPath, startSec, durationSec, fps, _useToneMapping);
         if (frames == null) return results;
+
+        // If tone mapping produced 0 frames, the zscale chain likely failed — fall back to
+        // the simple filter and disable tone mapping for the rest of this session.
+        if (frames.Count == 0 && _useToneMapping)
+        {
+            _logger.Warn("[AI] Tone-mapped extraction returned 0 frames — zscale may be unavailable " +
+                         "or rejected this file's color metadata. Falling back to simple filter chain.");
+            _useToneMapping = false;
+            frames = ExtractFrames(videoPath, startSec, durationSec, fps, useToneMapping: false);
+            if (frames == null) return results;
+        }
 
         double intervalSec = 1.0 / fps;
         ulong intervalMs = (ulong)Math.Round(intervalSec * 1000);
@@ -93,16 +108,25 @@ internal class FrameAnalysisPipeline
 
     // ── Private helpers ──────────────────────────────────────────────
 
-    private List<byte[]>? ExtractFrames(string videoPath, double startSec, double durationSec, float fps)
+    private List<byte[]>? ExtractFrames(
+        string videoPath, double startSec, double durationSec, float fps, bool useToneMapping)
     {
         // One ffmpeg invocation extracts all frames in the window at the requested fps.
         // Output: raw RGB24 bytes, each frame exactly BytesPerFrame bytes.
-        // Tone-map HDR10/HLG to SDR via zscale (libzimg) before extracting colors.
-        // For SDR content the zscale steps are no-ops. npl=100 targets 100-nit SDR reference.
-        var vf = $"fps={fps:F2},scale={FrameWidth}:{FrameHeight}," +
+        string vf;
+        if (useToneMapping)
+        {
+            // Tone-map HDR10/HLG → SDR via zscale (libzimg). npl=100 targets 100-nit SDR reference.
+            // For SDR content the zscale steps are effectively no-ops.
+            vf = $"fps={fps:F2},scale={FrameWidth}:{FrameHeight}," +
                  $"zscale=t=linear:npl=100,format=gbrpf32le," +
                  $"zscale=p=bt709,tonemap=tonemap=hable:desat=0," +
                  $"zscale=t=bt709:m=bt709:r=tv";
+        }
+        else
+        {
+            vf = $"fps={fps:F2},scale={FrameWidth}:{FrameHeight}";
+        }
 
         var args = $"-ss {startSec:F3} -t {durationSec:F3} -i \"{videoPath}\" " +
                    $"-vf \"{vf}\" " +
@@ -131,8 +155,8 @@ internal class FrameAnalysisPipeline
             return null;
         }
 
-        // Drain stderr asynchronously to prevent pipe buffer deadlock
-        _ = process.StandardError.ReadToEndAsync();
+        // Capture stderr asynchronously to prevent pipe buffer deadlock; log on failure.
+        var stderrTask = process.StandardError.ReadToEndAsync();
 
         var frames = new List<byte[]>();
         var stdout = process.StandardOutput.BaseStream;
@@ -151,6 +175,14 @@ internal class FrameAnalysisPipeline
             _logger.Warn("[AI] ffmpeg timed out after 5s — killing process");
             try { process.Kill(); } catch { }
         }
+
+        if (frames.Count == 0 && stderrTask.IsCompleted)
+        {
+            var stderr = stderrTask.Result.Trim();
+            if (!string.IsNullOrEmpty(stderr))
+                _logger.Warn("[AI] ffmpeg stderr: {0}", stderr);
+        }
+
         return frames;
     }
 
