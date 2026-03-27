@@ -19,7 +19,6 @@ internal class FrameAnalysisPipeline
     private readonly string _ffmpegPath;
 
     private byte[]? _previousFrameRgb;
-    private ulong _previousFrameTimestampMs;
 
     public FrameAnalysisPipeline(PluginOptions options, ILogger logger)
     {
@@ -36,6 +35,7 @@ internal class FrameAnalysisPipeline
     public List<AnalysisResult> AnalyzeWindow(string videoPath, ulong startMs, ulong endMs)
     {
         var results = new List<AnalysisResult>();
+        if (endMs <= startMs) return results;
         if (!File.Exists(videoPath)) return results;
 
         double startSec = startMs / 1000.0;
@@ -46,9 +46,10 @@ internal class FrameAnalysisPipeline
         if (frames == null) return results;
 
         double intervalSec = 1.0 / fps;
+        ulong intervalMs = (ulong)Math.Round(intervalSec * 1000);
         for (int i = 0; i < frames.Count; i++)
         {
-            ulong frameTimestampMs = startMs + (ulong)(i * intervalSec * 1000);
+            ulong frameTimestampMs = startMs + (ulong)i * intervalMs;
             var frameRgb = frames[i];
 
             // Apply preprocessing in place
@@ -79,7 +80,6 @@ internal class FrameAnalysisPipeline
             results.Add(new AnalysisResult(frameTimestampMs, r, g, b, transitionMs, isSceneCut));
 
             _previousFrameRgb = frameRgb;
-            _previousFrameTimestampMs = frameTimestampMs;
         }
 
         return results;
@@ -89,7 +89,6 @@ internal class FrameAnalysisPipeline
     public void ResetOnSeek()
     {
         _previousFrameRgb = null;
-        _previousFrameTimestampMs = 0;
     }
 
     // ── Private helpers ──────────────────────────────────────────────
@@ -136,7 +135,12 @@ internal class FrameAnalysisPipeline
             frames.Add((byte[])buf.Clone());
         }
 
-        process.WaitForExit(timeout: TimeSpan.FromSeconds(5));
+        bool exited = process.WaitForExit(timeout: TimeSpan.FromSeconds(5));
+        if (!exited)
+        {
+            _logger.Warn("[AI] ffmpeg timed out after 5s — killing process");
+            try { process.Kill(); } catch { }
+        }
         return frames;
     }
 
