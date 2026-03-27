@@ -138,11 +138,11 @@ internal class FrameAnalysisPipeline
         }
 
         // -hwaccel auto: try any available hardware decoder (VAAPI, NVDEC, D3D11VA, etc.),
-        // fall back to software if none found. -hwaccel_output_format yuv420p downloads
-        // decoded frames to system memory so software filters (scale, zscale) can consume them.
-        string hwaccelArgs = useHwAccel
-            ? "-hwaccel auto -hwaccel_output_format yuv420p "
-            : "";
+        // fall back to software if none found. No -hwaccel_output_format — letting ffmpeg
+        // keep frames in their native hardware format (p010le, nv12, etc.) avoids chroma
+        // plane misalignment on 10-bit HDR content. The software filters (scale, zscale)
+        // trigger an automatic hwdownload at the point they're needed.
+        string hwaccelArgs = useHwAccel ? "-hwaccel auto " : "";
 
         var args = $"{hwaccelArgs}-ss {startSec:F3} -t {durationSec:F3} -i \"{videoPath}\" " +
                    $"-vf \"{vf}\" " +
