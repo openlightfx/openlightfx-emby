@@ -20,9 +20,9 @@ internal class FrameAnalysisPipeline
 
     private volatile byte[]? _previousFrameRgb;
 
-    // Starts true; flipped to false on first batch if the tone-mapped chain produces 0 frames
-    // (indicates zscale is unavailable or rejects this file's color metadata).
+    // Flipped to false the first time a mode produces 0 frames, disabling it for the session.
     private volatile bool _useToneMapping = true;
+    private volatile bool _useHwAccel = true;
 
     public FrameAnalysisPipeline(PluginOptions options, ILogger logger)
     {
@@ -46,17 +46,25 @@ internal class FrameAnalysisPipeline
         double durationSec = (endMs - startMs) / 1000.0;
         float fps = Math.Max(0.1f, _options.AiAnalysisRateFps);
 
-        var frames = ExtractFrames(videoPath, startSec, durationSec, fps, _useToneMapping);
+        var frames = ExtractFrames(videoPath, startSec, durationSec, fps, _useToneMapping, _useHwAccel);
         if (frames == null) return results;
 
-        // If tone mapping produced 0 frames, the zscale chain likely failed — fall back to
-        // the simple filter and disable tone mapping for the rest of this session.
+        // If tone mapping produced 0 frames, zscale likely failed — disable and retry.
         if (frames.Count == 0 && _useToneMapping)
         {
             _logger.Warn("[AI] Tone-mapped extraction returned 0 frames — zscale may be unavailable " +
                          "or rejected this file's color metadata. Falling back to simple filter chain.");
             _useToneMapping = false;
-            frames = ExtractFrames(videoPath, startSec, durationSec, fps, useToneMapping: false);
+            frames = ExtractFrames(videoPath, startSec, durationSec, fps, false, _useHwAccel);
+            if (frames == null) return results;
+        }
+
+        // If hardware decode produced 0 frames, disable it and retry with software decode.
+        if (frames.Count == 0 && _useHwAccel)
+        {
+            _logger.Warn("[AI] Hardware-accelerated extraction returned 0 frames — falling back to software decode.");
+            _useHwAccel = false;
+            frames = ExtractFrames(videoPath, startSec, durationSec, fps, _useToneMapping, false);
             if (frames == null) return results;
         }
 
@@ -109,7 +117,8 @@ internal class FrameAnalysisPipeline
     // ── Private helpers ──────────────────────────────────────────────
 
     private List<byte[]>? ExtractFrames(
-        string videoPath, double startSec, double durationSec, float fps, bool useToneMapping)
+        string videoPath, double startSec, double durationSec, float fps,
+        bool useToneMapping, bool useHwAccel)
     {
         // One ffmpeg invocation extracts all frames in the window at the requested fps.
         // Output: raw RGB24 bytes, each frame exactly BytesPerFrame bytes.
@@ -128,7 +137,14 @@ internal class FrameAnalysisPipeline
             vf = $"fps={fps:F2},scale={FrameWidth}:{FrameHeight}";
         }
 
-        var args = $"-ss {startSec:F3} -t {durationSec:F3} -i \"{videoPath}\" " +
+        // -hwaccel auto: try any available hardware decoder (VAAPI, NVDEC, D3D11VA, etc.),
+        // fall back to software if none found. -hwaccel_output_format yuv420p downloads
+        // decoded frames to system memory so software filters (scale, zscale) can consume them.
+        string hwaccelArgs = useHwAccel
+            ? "-hwaccel auto -hwaccel_output_format yuv420p "
+            : "";
+
+        var args = $"{hwaccelArgs}-ss {startSec:F3} -t {durationSec:F3} -i \"{videoPath}\" " +
                    $"-vf \"{vf}\" " +
                    $"-f rawvideo -pix_fmt rgb24 -loglevel error pipe:1";
 
@@ -214,20 +230,27 @@ internal class FrameAnalysisPipeline
 
     private static string FindFfmpeg()
     {
-        // Prefer Emby's own bundled ffmpeg — it's compiled against the same libs on
-        // LD_LIBRARY_PATH that the plugin process inherits. The system ffmpeg may be
-        // linked against a newer libstdc++ than Emby's bundled one provides.
-        string[] candidates = { "/opt/emby-server/bin/ffmpeg", "/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg" };
-        foreach (var candidate in candidates)
+        // Find ffmpeg relative to the running Emby server executable. This works on any
+        // platform and installation path — no hardcoded locations needed.
+        // Emby on Linux: /opt/emby-server/EmbyServer  → looks for bin/ffmpeg alongside it
+        // Emby on Windows: C:\Program Files\Emby Server\EmbyServer.exe → looks for ffmpeg.exe
+        try
         {
-            try
+            var exeDir = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule?.FileName);
+            if (exeDir != null)
             {
-                if (candidate == "ffmpeg") return candidate; // trust PATH as last resort
-                if (File.Exists(candidate)) return candidate;
+                string ext = OperatingSystem.IsWindows() ? ".exe" : "";
+                foreach (var rel in new[] { $"ffmpeg{ext}", Path.Combine("bin", $"ffmpeg{ext}") })
+                {
+                    var candidate = Path.Combine(exeDir, rel);
+                    if (File.Exists(candidate)) return candidate;
+                }
             }
-            catch { }
         }
-        return "ffmpeg";
+        catch { }
+
+        // Fall back to PATH
+        return OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
     }
 }
 
