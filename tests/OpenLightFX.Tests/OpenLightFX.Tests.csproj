@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Emby SDK references (required to compile the main project) -->
+  <ItemGroup>
+    <Reference Include="MediaBrowser.Common">
+      <HintPath>../../lib/MediaBrowser.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MediaBrowser.Controller">
+      <HintPath>../../lib/MediaBrowser.Controller.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="MediaBrowser.Model">
+      <HintPath>../../lib/MediaBrowser.Model.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Emby.Web.GenericEdit">
+      <HintPath>../../lib/Emby.Web.GenericEdit.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/OpenLightFX.Emby/OpenLightFX.Emby.csproj" />
+  </ItemGroup>
+
+</Project>
