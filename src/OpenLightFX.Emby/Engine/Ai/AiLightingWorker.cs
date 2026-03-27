@@ -129,17 +129,17 @@ internal class AiLightingWorker : IDisposable
             {
                 await Task.Delay(_options.PollIntervalMs, token);
 
-                if (await IsCpuThrottled(token))
-                {
-                    _logger.Debug("[AI] CPU above {0}% — skipping batch", _options.AiMaxCpuPercent);
-                    continue;
-                }
-
                 var currentPos = _session.CurrentPositionMs;
                 var windowEnd = currentPos + (ulong)_options.AiLookaheadMs;
 
                 var nextMs = (ulong)Volatile.Read(ref _nextUnanalyzedMs);
                 if (nextMs >= windowEnd) continue;
+
+                if (await IsCpuThrottled(token))
+                {
+                    _logger.Debug("[AI] CPU above {0}% — skipping batch", _options.AiMaxCpuPercent);
+                    continue;
+                }
 
                 // Analyze one 1000ms batch per loop iteration
                 var batchEnd = Math.Min(nextMs + 1000, windowEnd);

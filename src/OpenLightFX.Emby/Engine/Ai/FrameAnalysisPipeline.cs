@@ -18,7 +18,7 @@ internal class FrameAnalysisPipeline
     private readonly ILogger _logger;
     private readonly string _ffmpegPath;
 
-    private byte[]? _previousFrameRgb;
+    private volatile byte[]? _previousFrameRgb;
 
     public FrameAnalysisPipeline(PluginOptions options, ILogger logger)
     {
@@ -109,7 +109,7 @@ internal class FrameAnalysisPipeline
                 Arguments = args,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
-                RedirectStandardError = false,
+                RedirectStandardError = true,
                 CreateNoWindow = true
             }
         };
@@ -123,6 +123,9 @@ internal class FrameAnalysisPipeline
             _logger.Warn("[AI] Failed to start ffmpeg at '{0}': {1}", _ffmpegPath, ex.Message);
             return null;
         }
+
+        // Drain stderr asynchronously to prevent pipe buffer deadlock
+        _ = process.StandardError.ReadToEndAsync();
 
         var frames = new List<byte[]>();
         var stdout = process.StandardOutput.BaseStream;
