@@ -186,6 +186,11 @@ internal class AiLightingWorker : IDisposable
 
     private static Keyframe ToKeyframe(AnalysisResult result)
     {
+        // Turn lights off when the frame is effectively black (dark scene / fade to black).
+        // BT.601 luminance below 8 on a 0–255 scale is indistinguishable from off.
+        float lum = 0.299f * result.R + 0.587f * result.G + 0.114f * result.B;
+        bool powerOn = lum >= 8f;
+
         return new Keyframe
         {
             Id = $"ai-{result.TimestampMs}",
@@ -196,7 +201,7 @@ internal class AiLightingWorker : IDisposable
             Brightness = 100,
             TransitionMs = result.TransitionMs,
             Interpolation = InterpolationMode.Linear,
-            PowerOn = true
+            PowerOn = powerOn
         };
     }
 

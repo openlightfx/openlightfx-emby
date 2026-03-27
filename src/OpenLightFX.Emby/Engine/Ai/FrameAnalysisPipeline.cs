@@ -97,8 +97,15 @@ internal class FrameAnalysisPipeline
     {
         // One ffmpeg invocation extracts all frames in the window at the requested fps.
         // Output: raw RGB24 bytes, each frame exactly BytesPerFrame bytes.
+        // Tone-map HDR10/HLG to SDR via zscale (libzimg) before extracting colors.
+        // For SDR content the zscale steps are no-ops. npl=100 targets 100-nit SDR reference.
+        var vf = $"fps={fps:F2},scale={FrameWidth}:{FrameHeight}," +
+                 $"zscale=t=linear:npl=100,format=gbrpf32le," +
+                 $"zscale=p=bt709,tonemap=tonemap=hable:desat=0," +
+                 $"zscale=t=bt709:m=bt709:r=tv";
+
         var args = $"-ss {startSec:F3} -t {durationSec:F3} -i \"{videoPath}\" " +
-                   $"-vf \"fps={fps:F2},scale={FrameWidth}:{FrameHeight}\" " +
+                   $"-vf \"{vf}\" " +
                    $"-f rawvideo -pix_fmt rgb24 -loglevel error pipe:1";
 
         using var process = new Process
