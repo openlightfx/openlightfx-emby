@@ -87,6 +87,43 @@ public class PluginOptions : EditableOptionsBase
     [EditMultiline(4)]
     public string AdditionalScanPaths { get; set; } = "";
 
+    // --- AI Lighting ---
+    [DisplayName("AI Lighting Mode")]
+    [Description("When enabled, AI lighting takes precedence over .lightfx track files. " +
+        "The plugin analyzes each video's frames in real time and drives bulbs to match " +
+        "the dominant background color.")]
+    public bool AiLightingEnabled { get; set; } = false;
+
+    [DisplayName("AI Lookahead (ms)")]
+    [Description("How far ahead of the current playback position to analyze frames (milliseconds). " +
+        "Larger values give the worker more headroom on slow hardware.")]
+    public int AiLookaheadMs { get; set; } = 30000;
+
+    [DisplayName("AI Analysis Rate (fps)")]
+    [Description("Frames extracted per second of video time. 2.0 is sufficient for scene-level changes.")]
+    public float AiAnalysisRateFps { get; set; } = 2.0f;
+
+    [DisplayName("AI Center Exclusion (%)")]
+    [Description("Diameter of the center exclusion ellipse as a percentage of the frame. " +
+        "Pixels inside this ellipse (foreground subjects) are ignored during color analysis. " +
+        "Default 50 discards the central half of the frame.")]
+    public int AiCenterExclusionPercent { get; set; } = 50;
+
+    [DisplayName("AI Cache Enabled")]
+    [Description("When enabled, analysis results are saved as a .ailfx sidecar file " +
+        "next to the video for instant reuse on subsequent playbacks.")]
+    public bool AiCacheEnabled { get; set; } = true;
+
+    [DisplayName("AI Scene Cut Threshold")]
+    [Description("Histogram difference (0.0–1.0) above which a scene boundary is detected. " +
+        "Lower = more sensitive. Default 0.35 catches hard cuts without triggering on gradual shifts.")]
+    public float AiSceneCutThreshold { get; set; } = 0.35f;
+
+    [DisplayName("AI Max CPU (%)")]
+    [Description("Worker pauses analysis when system CPU usage exceeds this percentage, " +
+        "preventing AI lighting from competing with the Emby transcoder.")]
+    public int AiMaxCpuPercent { get; set; } = 50;
+
     // --- Logging ---
     [DisplayName("Log Level")]
     [Description("Controls the verbosity of OpenLightFX log messages.")]
