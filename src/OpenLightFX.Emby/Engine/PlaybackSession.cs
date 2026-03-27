@@ -60,6 +60,15 @@ public class PlaybackSession
     // Last-sent command per bulb — used to skip redundant dispatches when state is unchanged
     private readonly Dictionary<string, BulbCommand> _lastSentCommands = new();
 
+    // AI keyframe injection: worker appends to this queue; ProcessKeyframes drains it each tick
+    private readonly ConcurrentQueue<Keyframe> _aiKeyframeQueue = new();
+
+    /// <summary>
+    /// Raised when a seek is detected. AI lighting worker uses this to reset its analysis cursor.
+    /// The argument is the new playback position in milliseconds.
+    /// </summary>
+    public Action<ulong>? OnSeek { get; set; }
+
     public PlaybackSession(
         TrackInfo trackInfo,
         List<BulbConfig> bulbConfigs,
@@ -93,6 +102,16 @@ public class PlaybackSession
 
     public PlaybackState State => _state;
     public ulong CurrentPositionMs => _currentPositionMs;
+
+    /// <summary>
+    /// Appends AI-generated keyframes to the session. Thread-safe — called from AiLightingWorker.
+    /// Keyframes are merged into the sorted keyframe list on the next Tick().
+    /// </summary>
+    public void AppendKeyframes(IEnumerable<Keyframe> keyframes)
+    {
+        foreach (var kf in keyframes)
+            _aiKeyframeQueue.Enqueue(kf);
+    }
 
     /// <summary>Initialize drivers and dispatch the first keyframe state (no bare power-on).</summary>
     public async Task StartAsync()
@@ -217,6 +236,7 @@ public class PlaybackSession
                     _expandedEffects.Clear();
                     _lastSentCommands.Clear();
                     _lastDispatchedMs = 0;
+                    OnSeek?.Invoke(adjusted); // notify AI worker
                 }
                 else
                 {
@@ -238,6 +258,7 @@ public class PlaybackSession
                     _expandedEffects.Clear();
                     _lastSentCommands.Clear();
                     _lastDispatchedMs = 0;
+                    OnSeek?.Invoke(adjusted); // notify AI worker
                 }
                 // Small forward drift or exact match — accept the correction below
             }
@@ -288,6 +309,22 @@ public class PlaybackSession
 
     private void ProcessKeyframes(ulong positionMs)
     {
+        // Drain AI keyframe queue into the sorted list
+        while (_aiKeyframeQueue.TryDequeue(out var aiKf))
+        {
+            // Binary search for insertion point (sort key: ChannelId then TimestampMs)
+            int lo = 0, hi = _sortedKeyframes.Count;
+            while (lo < hi)
+            {
+                int mid = (lo + hi) / 2;
+                var m = _sortedKeyframes[mid];
+                int cmp = string.Compare(m.ChannelId, aiKf.ChannelId, StringComparison.Ordinal);
+                if (cmp == 0) cmp = m.TimestampMs.CompareTo(aiKf.TimestampMs);
+                if (cmp < 0) lo = mid + 1; else hi = mid;
+            }
+            _sortedKeyframes.Insert(lo, aiKf);
+        }
+
         foreach (var channelId in _channelManager.GetChannelIds())
         {
             // Get keyframes for this channel
