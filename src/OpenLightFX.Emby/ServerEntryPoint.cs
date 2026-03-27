@@ -116,6 +116,10 @@ public class ServerEntryPoint : IServerEntryPoint
             session.StopAsync().GetAwaiter().GetResult();
         _sessions.Clear();
 
+        foreach (var worker in _aiWorkers.Values)
+            worker.Dispose();
+        _aiWorkers.Clear();
+
         _logger.Info("OpenLightFX shut down complete");
     }
 
