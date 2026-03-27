@@ -11,7 +11,7 @@ using Openlightfx;
 /// generated keyframes into the live PlaybackSession via AppendKeyframes().
 /// Also manages the .ailfx sidecar cache: loads it on start, writes it on stop.
 /// </summary>
-public class AiLightingWorker : IDisposable
+internal class AiLightingWorker : IDisposable
 {
     private const string AiChannelId = "ai-ambient";
     private const ulong MinBufferMs = 2000;
@@ -25,10 +25,10 @@ public class AiLightingWorker : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private Task? _workerTask;
 
-    // Cursor: next timestamp (ms) to analyze from
-    private ulong _nextUnanalyzedMs;
+    // Cursor: next timestamp (ms) to analyze from; accessed via Volatile/Interlocked for thread safety
+    private long _nextUnanalyzedMs;
 
-    // Tracks generated timestamps to avoid duplicates across seeks
+    // Tracks generated timestamps globally (monotonically growing) to deduplicate across seeks
     private readonly HashSet<ulong> _generatedTimestamps = new();
 
     // All keyframes generated this session — accumulated for cache write on stop
@@ -98,7 +98,7 @@ public class AiLightingWorker : IDisposable
     public void Start()
     {
         // Initialize cursor from current session position (handles late attach)
-        _nextUnanalyzedMs = _session.CurrentPositionMs + MinBufferMs;
+        Volatile.Write(ref _nextUnanalyzedMs, (long)(_session.CurrentPositionMs + MinBufferMs));
         _workerTask = Task.Run(RunLoop, _cts.Token);
         _logger.Info("[AI] Analysis worker started for '{0}'", Path.GetFileName(_videoPath));
     }
@@ -106,12 +106,10 @@ public class AiLightingWorker : IDisposable
     /// <summary>Called by PlaybackSession.OnSeek. Resets the analysis cursor.</summary>
     public void NotifySeek(ulong seekPositionMs)
     {
-        if (seekPositionMs > _nextUnanalyzedMs)
+        if (seekPositionMs > (ulong)Volatile.Read(ref _nextUnanalyzedMs))
         {
-            // Forward seek: jump cursor ahead and clear duplicate-tracking (new territory)
-            Interlocked.Exchange(ref _nextUnanalyzedMs, seekPositionMs + MinBufferMs);
-            lock (_allKeyframesLock)
-                _generatedTimestamps.Clear();
+            // Forward seek: jump cursor ahead (_generatedTimestamps kept for global dedup)
+            Interlocked.Exchange(ref _nextUnanalyzedMs, (long)(seekPositionMs + MinBufferMs));
             _logger.Debug("[AI] Forward seek to {0}ms — resetting cursor", seekPositionMs);
         }
         // Backward seek: existing keyframes still valid; cursor stays where it is
@@ -131,7 +129,7 @@ public class AiLightingWorker : IDisposable
             {
                 await Task.Delay(_options.PollIntervalMs, token);
 
-                if (IsCpuThrottled())
+                if (await IsCpuThrottled(token))
                 {
                     _logger.Debug("[AI] CPU above {0}% — skipping batch", _options.AiMaxCpuPercent);
                     continue;
@@ -140,13 +138,14 @@ public class AiLightingWorker : IDisposable
                 var currentPos = _session.CurrentPositionMs;
                 var windowEnd = currentPos + (ulong)_options.AiLookaheadMs;
 
-                if (_nextUnanalyzedMs >= windowEnd) continue;
+                var nextMs = (ulong)Volatile.Read(ref _nextUnanalyzedMs);
+                if (nextMs >= windowEnd) continue;
 
                 // Analyze one 1000ms batch per loop iteration
-                var batchEnd = Math.Min(_nextUnanalyzedMs + 1000, windowEnd);
-                _logger.Debug("[AI] Analyzing {0}ms–{1}ms", _nextUnanalyzedMs, batchEnd);
+                var batchEnd = Math.Min(nextMs + 1000, windowEnd);
+                _logger.Debug("[AI] Analyzing {0}ms–{1}ms", nextMs, batchEnd);
 
-                var results = _pipeline.AnalyzeWindow(_videoPath, _nextUnanalyzedMs, batchEnd);
+                var results = _pipeline.AnalyzeWindow(_videoPath, nextMs, batchEnd);
 
                 if (results.Count > 0)
                 {
@@ -170,7 +169,7 @@ public class AiLightingWorker : IDisposable
                     }
                 }
 
-                _nextUnanalyzedMs = batchEnd;
+                Volatile.Write(ref _nextUnanalyzedMs, (long)batchEnd);
             }
             catch (OperationCanceledException)
             {
@@ -201,14 +200,14 @@ public class AiLightingWorker : IDisposable
         };
     }
 
-    private bool IsCpuThrottled()
+    private async Task<bool> IsCpuThrottled(CancellationToken token)
     {
         try
         {
             // Linux: sample /proc/stat over 100ms to estimate CPU usage
             var lines1 = File.ReadAllLines("/proc/stat");
             var cpu1 = ParseCpuLine(lines1[0]);
-            Thread.Sleep(100);
+            await Task.Delay(100, token);
             var lines2 = File.ReadAllLines("/proc/stat");
             var cpu2 = ParseCpuLine(lines2[0]);
 
