@@ -11,6 +11,7 @@ using OpenLightFX.Emby.Discovery;
 using OpenLightFX.Emby.Drivers;
 using OpenLightFX.Emby.Effects;
 using OpenLightFX.Emby.Engine;
+using OpenLightFX.Emby.Engine.Ai;
 using OpenLightFX.Emby.Models;
 using OpenLightFX.Emby.Services;
 using OpenLightFX.Emby.Utilities;
@@ -42,6 +43,9 @@ public class ServerEntryPoint : IServerEntryPoint
 
     // Active lighting sessions keyed by Emby session ID
     private readonly ConcurrentDictionary<string, PlaybackSession> _sessions = new();
+
+    // AI lighting workers, keyed by Emby session ID (parallel to _sessions)
+    private readonly ConcurrentDictionary<string, AiLightingWorker> _aiWorkers = new();
 
     // Per-session lighting enabled toggle (EMB-152)
     private readonly ConcurrentDictionary<string, bool> _lightingEnabled = new();
@@ -154,6 +158,11 @@ public class ServerEntryPoint : IServerEntryPoint
                 _ = session.StopAsync();
                 _logger.Info("Lighting session stopped: {0}", sessionId);
             }
+
+            // Dispose AI worker if one is active (writes the .ailfx cache on dispose)
+            if (_aiWorkers.TryRemove(sessionId, out var worker))
+                worker.Dispose();
+
             _noTrackSessions.TryRemove(sessionId, out _);
             _lightingEnabled.TryRemove(sessionId, out _); // Reset toggle on stop (EMB-152)
         }
@@ -250,6 +259,14 @@ public class ServerEntryPoint : IServerEntryPoint
             item.ProviderIds?.TryGetValue("Imdb", out imdbId);
 
             var options = GetOptions();
+
+            // AI lighting mode: skip track discovery, use frame analysis instead
+            if (options.AiLightingEnabled)
+            {
+                await TryStartAiLightingSession(sessionId, moviePath, item.Name ?? "Unknown", options);
+                return;
+            }
+
             var scanPaths = _configService.GetScanPaths(options.AdditionalScanPaths);
 
             var tracks = _trackDiscoveryService.DiscoverTracks(moviePath, imdbId, scanPaths);
@@ -385,4 +402,77 @@ public class ServerEntryPoint : IServerEntryPoint
     /// <summary>Get active session info for status endpoint.</summary>
     public IEnumerable<(string SessionId, bool LightingEnabled)> GetActiveSessionInfo() =>
         _sessions.Keys.Select(id => (id, IsLightingEnabled(id)));
+
+    private async Task TryStartAiLightingSession(
+        string sessionId, string moviePath, string itemName, PluginOptions options)
+    {
+        _logger.Info("[AI] Starting AI lighting session: session={0}, item='{1}'", sessionId, itemName);
+
+        var bulbs = _configService.ParseBulbConfig(options.BulbConfigJson);
+        if (bulbs.Count == 0)
+        {
+            _logger.Warn("[AI] No bulbs configured — skipping AI lighting for '{0}'", itemName);
+            _noTrackSessions.TryAdd(sessionId, true);
+            return;
+        }
+
+        // Build a synthetic LightFXTrack with a single ai-ambient channel
+        var syntheticTrack = new LightFXTrack { Version = 1 };
+        syntheticTrack.Metadata = new TrackMetadata
+        {
+            Title = $"{itemName} (AI Lighting)",
+            DurationMs = 1, // placeholder — V-004 requires > 0; not used for live playback
+            Tags = { "ai-generated" }
+        };
+        syntheticTrack.Channels.Add(new Channel
+        {
+            Id = "ai-ambient",
+            DisplayName = "AI Ambient",
+            SpatialHint = "SPATIAL_AMBIENT",
+            Optional = false
+        });
+
+        var trackInfo = new TrackInfo
+        {
+            FilePath = moviePath + ".ailfx",
+            FileName = Path.GetFileNameWithoutExtension(moviePath) + ".ailfx",
+            Track = syntheticTrack,
+            IsValid = true
+        };
+
+        // Map all bulbs to the ai-ambient channel
+        var aiProfile = new MappingProfile
+        {
+            Name = "AI Ambient",
+            Mappings = new List<ChannelMapping>
+            {
+                new ChannelMapping
+                {
+                    ChannelId = "ai-ambient",
+                    BulbIds = bulbs.Select(b => b.Id).ToList()
+                }
+            }
+        };
+
+        var session = new PlaybackSession(trackInfo, bulbs, aiProfile, options, _effectFactory, _logger);
+
+        var worker = new AiLightingWorker(session, moviePath, options, _logger);
+        session.OnSeek = worker.NotifySeek;
+
+        if (_sessions.TryAdd(sessionId, session))
+        {
+            await session.StartAsync();
+
+            // Try to load from cache first; only start analysis loop if cache miss
+            if (!worker.TryLoadCache())
+                worker.Start();
+
+            _aiWorkers.TryAdd(sessionId, worker);
+            _logger.Info("[AI] Session started for '{0}'", itemName);
+        }
+        else
+        {
+            worker.Dispose();
+        }
+    }
 }
