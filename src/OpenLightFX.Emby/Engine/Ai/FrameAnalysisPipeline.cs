@@ -132,18 +132,16 @@ internal class FrameAnalysisPipeline
                    $"-vf \"{vf}\" " +
                    $"-f rawvideo -pix_fmt rgb24 -loglevel error pipe:1";
 
-        using var process = new Process
+        var psi = new ProcessStartInfo
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = _ffmpegPath,
-                Arguments = args,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            }
+            FileName = _ffmpegPath,
+            Arguments = args,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
         };
+        using var process = new Process { StartInfo = psi };
 
         try
         {
@@ -216,7 +214,10 @@ internal class FrameAnalysisPipeline
 
     private static string FindFfmpeg()
     {
-        string[] candidates = { "/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg" };
+        // Prefer Emby's own bundled ffmpeg — it's compiled against the same libs on
+        // LD_LIBRARY_PATH that the plugin process inherits. The system ffmpeg may be
+        // linked against a newer libstdc++ than Emby's bundled one provides.
+        string[] candidates = { "/opt/emby-server/bin/ffmpeg", "/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "ffmpeg" };
         foreach (var candidate in candidates)
         {
             try
