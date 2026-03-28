@@ -124,6 +124,12 @@ public class PluginOptions : EditableOptionsBase
         "preventing AI lighting from competing with the Emby transcoder.")]
     public int AiMaxCpuPercent { get; set; } = 50;
 
+    [DisplayName("AI HDR Tone Mapping")]
+    [Description("When enabled, applies HDR→SDR tone mapping (zscale + hable) before color analysis. " +
+        "Improves accuracy on HDR10/HLG content. Requires libzimg in your ffmpeg build. " +
+        "Disable if frame extraction fails or returns 0 frames on HDR content.")]
+    public bool AiToneMappingEnabled { get; set; } = true;
+
     // --- Logging ---
     [DisplayName("Log Level")]
     [Description("Controls the verbosity of OpenLightFX log messages.")]

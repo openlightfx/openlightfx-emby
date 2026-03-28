@@ -20,8 +20,8 @@ internal class FrameAnalysisPipeline
 
     private volatile byte[]? _previousFrameRgb;
 
-    // Flipped to false the first time a mode produces 0 frames, disabling it for the session.
-    private volatile bool _useToneMapping = true;
+    // Initialized from plugin settings; flipped to false if zscale/hwaccel fails during the session.
+    private volatile bool _useToneMapping;
     private volatile bool _useHwAccel = true;
 
     public FrameAnalysisPipeline(PluginOptions options, ILogger logger)
@@ -29,6 +29,7 @@ internal class FrameAnalysisPipeline
         _options = options;
         _logger = logger;
         _ffmpegPath = FindFfmpeg();
+        _useToneMapping = options.AiToneMappingEnabled;
     }
 
     /// <summary>
