@@ -17,7 +17,7 @@ public class HueDriver : IBulbDriver
     private const uint MaxCommandsPerSecond = 10;
     private const int RateLimitIntervalMs = 1000 / (int)MaxCommandsPerSecond; // 100ms
 
-    private readonly BulbConfig _config;
+    private readonly HueBulbConfig _config;
     private readonly HttpClient _httpClient;
     private readonly BulbCapabilityProfile _capabilities;
     private readonly string _baseUrl;
@@ -30,16 +30,14 @@ public class HueDriver : IBulbDriver
 
     public string DriverName => "Philips Hue";
 
-    public HueDriver(BulbConfig config)
+    public HueDriver(HueBulbConfig config)
     {
         _config = config;
         _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
 
-        var bridgeIp = config.HueBridgeIp
-            ?? throw new ArgumentException("HueBridgeIp is required for Hue driver");
-        var apiKey = config.HueApiKey
-            ?? throw new ArgumentException("HueApiKey is required for Hue driver");
-        var lightId = config.HueLightId ?? config.IpAddress; // prefer HueLightId, fall back to IpAddress
+        var bridgeIp = config.HueBridgeIp;
+        var apiKey = config.HueApiKey;
+        var lightId = config.HueLightId ?? config.IpAddress.ToString(); // prefer HueLightId, fall back to IpAddress
 
         _baseUrl = $"http://{bridgeIp}/api/{apiKey}";
         _lightUrl = $"{_baseUrl}/lights/{lightId}";

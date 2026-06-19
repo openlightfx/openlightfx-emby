@@ -4,11 +4,12 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
+using OpenLightFX.Emby.Models;
 
 public class WizDiscovery : IDiscoveryModule
 {
     private const int WizPort = 38899;
-    public string Protocol => "Wiz";
+    public BulbProtocol Protocol => BulbProtocol.Wiz;
 
     public async Task<List<DiscoveredBulb>> DiscoverAsync(int timeoutMs, CancellationToken ct)
     {
@@ -44,9 +45,9 @@ public class WizDiscovery : IDiscoveryModule
 
                 bulbs.Add(new DiscoveredBulb
                 {
-                    IpAddress = result.RemoteEndPoint.Address.ToString(),
+                    IpAddress = result.RemoteEndPoint.Address,
                     Port = WizPort,
-                    Protocol = "Wiz",
+                    Protocol = BulbProtocol.Wiz,
                     MacAddress = mac,
                     Model = moduleName,
                     Name = null

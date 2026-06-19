@@ -1,11 +1,22 @@
 namespace OpenLightFX.Emby.Discovery;
 
+using System.Net;
+using System.Text.Json.Serialization;
+using OpenLightFX.Emby.Models;
+using OpenLightFX.Emby.Utilities;
+
 public class DiscoveredBulb
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
-    public string IpAddress { get; set; } = string.Empty;
+
+    [JsonConverter(typeof(IPAddressJsonConverter))]
+    public IPAddress IpAddress { get; set; } = IPAddress.None;
+
     public int Port { get; set; }
-    public string Protocol { get; set; } = string.Empty; // "Wiz", "Hue", "Lifx", "Govee"
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public BulbProtocol Protocol { get; set; } = BulbProtocol.Unknown;
+
     public string? MacAddress { get; set; }
     public string? Model { get; set; }
     public string? Name { get; set; }

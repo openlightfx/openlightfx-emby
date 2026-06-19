@@ -18,7 +18,7 @@ public class WizDriver : IBulbDriver
     private const uint WizColorTempMin = 2200;
     private const uint WizColorTempMax = 6500;
 
-    private readonly BulbConfig _config;
+    private readonly WizBulbConfig _config;
     private readonly IPEndPoint _endpoint;
     private readonly UdpClient _udpClient;
     private readonly BulbCapabilityProfile _capabilities;
@@ -26,12 +26,12 @@ public class WizDriver : IBulbDriver
 
     public string DriverName => "Wiz";
 
-    public WizDriver(BulbConfig config)
+    public WizDriver(WizBulbConfig config)
     {
         _config = config;
 
         var port = config.Port > 0 ? config.Port : WizPort;
-        _endpoint = new IPEndPoint(IPAddress.Parse(config.IpAddress), port);
+        _endpoint = new IPEndPoint(config.IpAddress, port);
 
         _udpClient = new UdpClient();
         _udpClient.Client.ReceiveTimeout = ResponseTimeoutMs;

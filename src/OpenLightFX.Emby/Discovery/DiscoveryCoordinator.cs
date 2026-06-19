@@ -1,5 +1,7 @@
 namespace OpenLightFX.Emby.Discovery;
 
+using OpenLightFX.Emby.Models;
+
 public class DiscoveryCoordinator
 {
     private readonly List<IDiscoveryModule> _modules;
@@ -19,13 +21,12 @@ public class DiscoveryCoordinator
     /// Run discovery across specified (or all) protocols concurrently.
     /// </summary>
     public async Task<List<DiscoveredBulb>> DiscoverAsync(
-        IEnumerable<string>? protocols = null,
+        IEnumerable<BulbProtocol>? protocols = null,
         int timeoutMs = 5000,
         CancellationToken ct = default)
     {
         var modules = protocols != null
-            ? _modules.Where(m => protocols.Any(p =>
-                string.Equals(p, m.Protocol, StringComparison.OrdinalIgnoreCase))).ToList()
+            ? _modules.Where(m => protocols.Contains(m.Protocol)).ToList()
             : _modules;
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);

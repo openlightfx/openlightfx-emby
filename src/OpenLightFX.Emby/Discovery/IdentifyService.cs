@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
+using OpenLightFX.Emby.Models;
 
 /// <summary>
 /// Sends visual identification sequences to discovered bulbs.
@@ -23,19 +24,19 @@ public class IdentifyService
     /// </summary>
     public async Task<int> IdentifyAsync(DiscoveredBulb bulb)
     {
-        return bulb.Protocol.ToLowerInvariant() switch
+        return bulb.Protocol switch
         {
-            "wiz" => await IdentifyWiz(bulb),
-            "hue" => await IdentifyHue(bulb),
-            "lifx" => await IdentifyLifx(bulb),
-            "govee" => await IdentifyGovee(bulb),
+            BulbProtocol.Wiz   => await IdentifyWiz(bulb),
+            BulbProtocol.Hue   => await IdentifyHue(bulb),
+            BulbProtocol.Lifx  => await IdentifyLifx(bulb),
+            BulbProtocol.Govee => await IdentifyGovee(bulb),
             _ => 0
         };
     }
 
     private async Task<int> IdentifyWiz(DiscoveredBulb bulb)
     {
-        var endpoint = new IPEndPoint(IPAddress.Parse(bulb.IpAddress), bulb.Port);
+        var endpoint = new IPEndPoint(bulb.IpAddress, bulb.Port);
         using var client = new UdpClient();
 
         // Save current state
@@ -99,7 +100,7 @@ public class IdentifyService
 
     private async Task<int> IdentifyLifx(DiscoveredBulb bulb)
     {
-        var endpoint = new IPEndPoint(IPAddress.Parse(bulb.IpAddress), bulb.Port);
+        var endpoint = new IPEndPoint(bulb.IpAddress, bulb.Port);
         using var client = new UdpClient();
 
         // Flash RGB 3 times using LIFX SetColor (type 102)
@@ -116,7 +117,7 @@ public class IdentifyService
 
     private async Task<int> IdentifyGovee(DiscoveredBulb bulb)
     {
-        var endpoint = new IPEndPoint(IPAddress.Parse(bulb.IpAddress), 4003);
+        var endpoint = new IPEndPoint(bulb.IpAddress, 4003);
         using var client = new UdpClient();
 
         // Flash RGB 3 times

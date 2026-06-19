@@ -1,7 +1,9 @@
 namespace OpenLightFX.Emby.Discovery;
 
+using OpenLightFX.Emby.Models;
+
 public interface IDiscoveryModule
 {
-    string Protocol { get; }
+    BulbProtocol Protocol { get; }
     Task<List<DiscoveredBulb>> DiscoverAsync(int timeoutMs, CancellationToken ct);
 }

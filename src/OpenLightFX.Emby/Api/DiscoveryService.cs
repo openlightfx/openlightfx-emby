@@ -5,6 +5,7 @@ using OpenLightFX.Emby.Configuration;
 using OpenLightFX.Emby.Discovery;
 using OpenLightFX.Emby.Models;
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -56,8 +57,8 @@ public class GetHueLightsRequest : IReturn<HueLightsResponse>
 [Route("/OpenLightFX/Discover/SaveConfig", "POST", Description = "Bulk-replace bulb config and mapping profiles from onboarding wizard")]
 public class SaveDiscoveredBulbConfigRequest : IReturn<SaveDiscoveredBulbConfigResponse>
 {
-    /// <summary>Full replacement list of bulbs to store in BulbConfigJson.</summary>
-    public List<BulbConfig>? Bulbs { get; set; }
+    /// <summary>Full replacement list of bulbs as a raw JSON array string.</summary>
+    public string? BulbsJson { get; set; }
 
     /// <summary>Full replacement list of mapping profiles to store in MappingProfilesJson.</summary>
     public List<MappingProfile>? MappingProfiles { get; set; }
@@ -230,15 +231,14 @@ public class DiscoveryService : IService
 
             var options = entry.GetOptions();
             var configuredBulbs = entry.ConfigService.ParseBulbConfig(options.BulbConfigJson);
-            var configuredIps = new HashSet<string>(
-                configuredBulbs.Select(b => b.IpAddress),
-                StringComparer.OrdinalIgnoreCase);
+            var configuredIps = new HashSet<IPAddress>(
+                configuredBulbs.Select(b => b.IpAddress));
 
             var dtos = discovered.Select(b => new DiscoveredBulbDto
             {
                 Id = b.Id,
-                Protocol = b.Protocol,
-                IpAddress = b.IpAddress,
+                Protocol = b.Protocol.ToString(),
+                IpAddress = b.IpAddress.ToString(),
                 MacAddress = b.MacAddress,
                 Name = b.Name,
                 Model = b.Model,
@@ -300,8 +300,8 @@ public class DiscoveryService : IService
         return new BulbStateResponse
         {
             Id = bulb.Id,
-            Protocol = bulb.Protocol,
-            IpAddress = bulb.IpAddress,
+            Protocol = bulb.Protocol.ToString(),
+            IpAddress = bulb.IpAddress.ToString(),
             Port = bulb.Port,
             MacAddress = bulb.MacAddress,
             Name = bulb.Name,
@@ -449,8 +449,8 @@ public class DiscoveryService : IService
             if (pluginOptions == null)
                 return new SaveDiscoveredBulbConfigResponse { Success = false, Error = "Plugin options not available" };
 
-            if (request.Bulbs != null)
-                pluginOptions.BulbConfigJson = JsonSerializer.Serialize(request.Bulbs, JsonOptions);
+            if (request.BulbsJson != null)
+                pluginOptions.BulbConfigJson = request.BulbsJson;
 
             if (request.MappingProfiles != null)
             {

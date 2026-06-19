@@ -1,43 +1,33 @@
 namespace OpenLightFX.Emby.Models;
 
+using System.Net;
 using System.Text.Json.Serialization;
+using OpenLightFX.Emby.Utilities;
 
-public class BulbConfig
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "protocol")]
+[JsonDerivedType(typeof(WizBulbConfig),   "Wiz")]
+[JsonDerivedType(typeof(HueBulbConfig),   "Hue")]
+[JsonDerivedType(typeof(LifxBulbConfig),  "Lifx")]
+[JsonDerivedType(typeof(GoveeBulbConfig), "Govee")]
+[JsonDerivedType(typeof(RestBulbConfig),  "Rest")]
+public abstract class BulbConfig
 {
     public string Id { get; set; } = string.Empty;
 
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
-    public string Protocol { get; set; } = string.Empty; // "Wiz", "Hue", "Lifx", "Govee", "Rest"
-    public string IpAddress { get; set; } = string.Empty;
+    /// <summary>Resolved from the JSON type discriminator; never stored as a separate field.</summary>
+    [JsonIgnore]
+    public abstract BulbProtocol Protocol { get; }
+
+    [JsonConverter(typeof(IPAddressJsonConverter))]
+    public IPAddress IpAddress { get; set; } = IPAddress.None;
+
     public int Port { get; set; }
     public string? SpatialPosition { get; set; }
     public string? MacAddress { get; set; }
     public string? Model { get; set; }
-
-    // Hue-specific
-    [JsonPropertyName("hueBridgeIp")]
-    public string? HueBridgeIp { get; set; }
-
-    [JsonPropertyName("hueApiKey")]
-    public string? HueApiKey { get; set; }
-
-    [JsonPropertyName("hueLightId")]
-    public string? HueLightId { get; set; }
-
-    // Generic REST-specific
-    [JsonPropertyName("restUrlTemplate")]
-    public string? RestUrlTemplate { get; set; }
-
-    [JsonPropertyName("restHttpMethod")]
-    public string? RestHttpMethod { get; set; }
-
-    [JsonPropertyName("restBodyTemplate")]
-    public string? RestBodyTemplate { get; set; }
-
-    [JsonPropertyName("restHeaders")]
-    public Dictionary<string, string>? RestHeaders { get; set; }
 
     // Capability overrides (null = use protocol defaults)
     public CapabilityOverrides? CapabilityOverrides { get; set; }

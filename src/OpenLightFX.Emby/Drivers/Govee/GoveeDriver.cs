@@ -17,7 +17,7 @@ public class GoveeDriver : IBulbDriver
     private const uint GoveeColorTempMin = 2000;
     private const uint GoveeColorTempMax = 9000;
 
-    private readonly BulbConfig _config;
+    private readonly GoveeBulbConfig _config;
     private readonly IPEndPoint _endpoint;
     private readonly UdpClient _udpClient;
     private readonly BulbCapabilityProfile _capabilities;
@@ -25,11 +25,11 @@ public class GoveeDriver : IBulbDriver
 
     public string DriverName => "Govee";
 
-    public GoveeDriver(BulbConfig config)
+    public GoveeDriver(GoveeBulbConfig config)
     {
         _config = config;
 
-        _endpoint = new IPEndPoint(IPAddress.Parse(config.IpAddress), GoveeControlPort);
+        _endpoint = new IPEndPoint(config.IpAddress, GoveeControlPort);
 
         _udpClient = new UdpClient();
         _udpClient.Client.ReceiveTimeout = ResponseTimeoutMs;

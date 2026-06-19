@@ -1,10 +1,12 @@
 namespace OpenLightFX.Emby.Discovery;
 
+using System.Net;
 using System.Text.Json.Nodes;
+using OpenLightFX.Emby.Models;
 
 public class HueDiscovery : IDiscoveryModule
 {
-    public string Protocol => "Hue";
+    public BulbProtocol Protocol => BulbProtocol.Hue;
 
     public async Task<List<DiscoveredBulb>> DiscoverAsync(int timeoutMs, CancellationToken ct)
     {
@@ -40,9 +42,9 @@ public class HueDiscovery : IDiscoveryModule
 
                 bulbs.Add(new DiscoveredBulb
                 {
-                    IpAddress = ip,
+                    IpAddress = IPAddress.Parse(ip),
                     Port = 80,
-                    Protocol = "Hue",
+                    Protocol = BulbProtocol.Hue,
                     MacAddress = mac,
                     Model = modelId,
                     Name = bridgeName

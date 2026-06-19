@@ -6,14 +6,14 @@ using System.Text;
 
 public class GenericRestDriver : IBulbDriver
 {
-    private readonly BulbConfig _config;
+    private readonly RestBulbConfig _config;
     private readonly HttpClient _httpClient;
     private readonly BulbCapabilityProfile _capabilities;
     private BulbState? _lastKnownState;
 
     public string DriverName => "Generic REST";
 
-    public GenericRestDriver(BulbConfig config)
+    public GenericRestDriver(RestBulbConfig config)
     {
         _config = config;
         _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };

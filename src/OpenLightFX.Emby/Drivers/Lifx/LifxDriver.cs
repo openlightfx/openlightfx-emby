@@ -28,7 +28,7 @@ public class LifxDriver : IBulbDriver
     private const int SetPowerRetryDelayMs = 200;
     private const int ReceiveTimeoutMs = 2000;
 
-    private readonly BulbConfig _config;
+    private readonly LifxBulbConfig _config;
     private readonly IPEndPoint _endpoint;
     private readonly UdpClient _udpClient;
     private readonly uint _source;
@@ -40,11 +40,11 @@ public class LifxDriver : IBulbDriver
 
     public string DriverName => "LIFX";
 
-    public LifxDriver(BulbConfig config)
+    public LifxDriver(LifxBulbConfig config)
     {
         _config = config;
         var port = config.Port > 0 ? config.Port : LifxDefaultPort;
-        _endpoint = new IPEndPoint(IPAddress.Parse(config.IpAddress), port);
+        _endpoint = new IPEndPoint(config.IpAddress, port);
 
         _udpClient = new UdpClient();
         _udpClient.Client.ReceiveTimeout = ReceiveTimeoutMs;

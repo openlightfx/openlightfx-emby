@@ -6,14 +6,14 @@ public static class BulbDriverFactory
 {
     public static IBulbDriver Create(BulbConfig config)
     {
-        return config.Protocol.ToLowerInvariant() switch
+        return config switch
         {
-            "wiz" => new Wiz.WizDriver(config),
-            "hue" => new Hue.HueDriver(config),
-            "lifx" => new Lifx.LifxDriver(config),
-            "govee" => new Govee.GoveeDriver(config),
-            "rest" => new GenericRest.GenericRestDriver(config),
-            _ => throw new ArgumentException($"Unknown bulb protocol: {config.Protocol}")
+            WizBulbConfig   wiz   => new Wiz.WizDriver(wiz),
+            HueBulbConfig   hue   => new Hue.HueDriver(hue),
+            LifxBulbConfig  lifx  => new Lifx.LifxDriver(lifx),
+            GoveeBulbConfig govee => new Govee.GoveeDriver(govee),
+            RestBulbConfig  rest  => new GenericRest.GenericRestDriver(rest),
+            _ => throw new ArgumentException($"Unknown bulb config type: {config.GetType().Name}")
         };
     }
 }

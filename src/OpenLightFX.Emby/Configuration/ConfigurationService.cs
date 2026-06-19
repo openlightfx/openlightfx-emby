@@ -38,7 +38,6 @@ public class ConfigurationService
             foreach (var c in configs)
             {
                 if (string.IsNullOrEmpty(c.Id)) return "Each bulb must have an 'id'";
-                if (string.IsNullOrEmpty(c.Protocol)) return $"Bulb '{c.Id}' is missing 'protocol'";
             }
             return null; // valid
         }

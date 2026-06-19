@@ -2,13 +2,14 @@ namespace OpenLightFX.Emby.Discovery;
 
 using System.Net;
 using System.Net.Sockets;
+using OpenLightFX.Emby.Models;
 
 public class LifxDiscovery : IDiscoveryModule
 {
     private const int LifxPort = 56700;
     private const ushort GetServiceType = 2;
     private const ushort StateServiceType = 3;
-    public string Protocol => "Lifx";
+    public BulbProtocol Protocol => BulbProtocol.Lifx;
 
     public async Task<List<DiscoveredBulb>> DiscoverAsync(int timeoutMs, CancellationToken ct)
     {
@@ -49,9 +50,9 @@ public class LifxDiscovery : IDiscoveryModule
 
                 bulbs.Add(new DiscoveredBulb
                 {
-                    IpAddress = result.RemoteEndPoint.Address.ToString(),
+                    IpAddress = result.RemoteEndPoint.Address,
                     Port = LifxPort,
-                    Protocol = "Lifx",
+                    Protocol = BulbProtocol.Lifx,
                     MacAddress = mac,
                     Model = null,
                     Name = null

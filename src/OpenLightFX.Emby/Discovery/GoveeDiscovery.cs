@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
+using OpenLightFX.Emby.Models;
 
 public class GoveeDiscovery : IDiscoveryModule
 {
@@ -11,7 +12,7 @@ public class GoveeDiscovery : IDiscoveryModule
     private const int SendPort = 4001;
     private const int ListenPort = 4002;
     private const int ControlPort = 4003;
-    public string Protocol => "Govee";
+    public BulbProtocol Protocol => BulbProtocol.Govee;
 
     public async Task<List<DiscoveredBulb>> DiscoverAsync(int timeoutMs, CancellationToken ct)
     {
@@ -52,15 +53,15 @@ public class GoveeDiscovery : IDiscoveryModule
                 var data = msg["data"]?.AsObject();
                 if (data == null) continue;
 
-                var ip = data["ip"]?.GetValue<string>() ?? result.RemoteEndPoint.Address.ToString();
+                var ipStr = data["ip"]?.GetValue<string>() ?? result.RemoteEndPoint.Address.ToString();
                 var device = data["device"]?.GetValue<string>();
                 var sku = data["sku"]?.GetValue<string>();
 
                 bulbs.Add(new DiscoveredBulb
                 {
-                    IpAddress = ip,
+                    IpAddress = IPAddress.Parse(ipStr),
                     Port = ControlPort,
-                    Protocol = "Govee",
+                    Protocol = BulbProtocol.Govee,
                     MacAddress = null,
                     Model = sku,
                     Name = device
