@@ -50,7 +50,7 @@ public class TrackParser
                 FileName = Path.GetFileName(filePath),
                 Track = new LightFXTrack(),
                 IsValid = false,
-                ValidationErrors = new List<string> { $"Failed to parse protobuf: {ex.Message}" }
+                ValidationErrors = new List<string> { $"V-001: Failed to parse protobuf: {ex.Message}" }
             };
         }
 

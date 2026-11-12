@@ -18,6 +18,14 @@
     <ProjectReference Include="..\..\src\OpenLightFX.Emby\OpenLightFX.Emby.csproj" />
   </ItemGroup>
 
+  <!-- Shared Studio fixtures. OLFX_FIXTURES overrides the vendored copy (pinned in Fixtures/sampling/SOURCE). -->
+  <ItemGroup>
+    <Content Include="Fixtures\sampling\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>fixtures\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
+  </ItemGroup>
+
   <ItemGroup>
     <Reference Include="MediaBrowser.Common">
       <HintPath>..\..\lib\MediaBrowser.Common.dll</HintPath>
@@ -30,6 +38,9 @@
     </Reference>
     <Reference Include="Emby.Web.GenericEdit">
       <HintPath>..\..\lib\Emby.Web.GenericEdit.dll</HintPath>
+    </Reference>
+    <Reference Include="ServiceStack.Text">
+      <HintPath>..\..\lib\ServiceStack.Text.dll</HintPath>
     </Reference>
   </ItemGroup>
 </Project>

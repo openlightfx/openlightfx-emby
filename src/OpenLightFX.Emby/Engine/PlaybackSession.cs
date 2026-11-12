@@ -294,13 +294,7 @@ public class PlaybackSession
             var channelKfs = GetChannelKeyframes(channelId);
             if (channelKfs.Count == 0) continue;
 
-            // Find the two keyframes bracketing the current position
-            var (prev, next) = FindBracketingKeyframes(channelKfs, positionMs);
-
-            if (next == null) continue;
-
-            // Interpolate
-            var state = InterpolationEngine.Interpolate(prev, next, positionMs);
+            var state = InterpolationEngine.SampleChannel(channelKfs, positionMs);
             _channelManager.SetChannelState(channelId, state);
         }
     }
@@ -507,37 +501,6 @@ public class PlaybackSession
         return _sortedEffects.Where(e => e.ChannelId == channelId).ToList();
     }
 
-    private (Keyframe? prev, Keyframe? next) FindBracketingKeyframes(
-        List<Keyframe> keyframes, ulong positionMs)
-    {
-        if (keyframes.Count == 0)
-            return (null, null);
-
-        // Binary search for the first keyframe at or after positionMs
-        int lo = 0, hi = keyframes.Count - 1;
-        int nextIdx = keyframes.Count; // default: past the end
-
-        while (lo <= hi)
-        {
-            int mid = lo + (hi - lo) / 2;
-            if (keyframes[mid].TimestampMs <= positionMs)
-                lo = mid + 1;
-            else
-            {
-                nextIdx = mid;
-                hi = mid - 1;
-            }
-        }
-
-        Keyframe? prev = nextIdx > 0 ? keyframes[nextIdx - 1] : null;
-        Keyframe? next = nextIdx < keyframes.Count ? keyframes[nextIdx] : null;
-
-        // If we're past all keyframes, use the last one as "next" for its held state
-        if (next == null && prev != null)
-            next = prev;
-
-        return (prev, next);
-    }
 }
 
 /// <summary>Groups an effect's rendered commands with its end time for lifetime tracking.</summary>

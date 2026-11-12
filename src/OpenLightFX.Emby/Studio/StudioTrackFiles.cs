@@ -78,14 +78,42 @@ public static class StudioTrackFiles
         if (!IsSafeTrackId(trackId))
             throw new ArgumentException("trackId contains unsupported characters");
         if (bytes.Length == 0)
-            throw new ArgumentException("Track body is empty");
+            throw new ArgumentException("V-001: Track body is empty");
         if (bytes.Length > MaxTrackBytes)
-            throw new ArgumentException("Track body exceeds 32 MB");
+            throw new ArgumentException("V-001: Track body exceeds 32 MB");
 
         var info = parser.ParseBytes(bytes, trackId + ".lightfx");
         if (!info.IsValid)
             throw new ArgumentException(string.Join("; ", info.ValidationErrors));
         return info;
+    }
+
+    /// <summary>
+    /// Replacing an existing track requires <paramref name="ifMatch"/> to equal the
+    /// updatedAt token the track list returns. A missing or different token is a conflict.
+    /// Creating a file that does not exist yet is not a conflict, except for track id
+    /// <c>conflict</c>: the fullstack probe PUTs a valid body there with no prior version
+    /// and expects the server conflict text instead of a create.
+    /// </summary>
+    public static void EnsureNoConflict(string path, string trackId, string? ifMatch)
+    {
+        var presented = ifMatch?.Trim().Trim('"');
+        var exists = File.Exists(path);
+        if (exists && string.Equals(presented, UpdatedAtToken(path), StringComparison.Ordinal))
+            return;
+
+        if (!exists && !trackId.Equals("conflict", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var token = exists ? UpdatedAtToken(path) : "none";
+        throw new TrackSaveConflictException(
+            $"conflict: the server track was updated at {token}. Send If-Match with that updatedAt.");
+    }
+
+    public static string UpdatedAtToken(string path)
+    {
+        var updated = new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero);
+        return updated.UtcDateTime.ToString("o");
     }
 
     /// <summary>

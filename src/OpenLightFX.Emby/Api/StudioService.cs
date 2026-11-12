@@ -1,9 +1,14 @@
 namespace OpenLightFX.Emby.Api;
 
+using System.Globalization;
+using System.Net;
+using System.Runtime.Serialization;
+using System.Text;
 using System.Text.Json.Serialization;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Net;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Services;
@@ -34,6 +39,36 @@ public class GetStudioStreamUrl : IReturn<StudioStreamUrlResponse>
     public string ItemId { get; set; } = "";
 }
 
+[Route("/OpenLightFX/Studio/Items/{ItemId}/MediaInfo", "GET", Description = "Movie timing, HDR, and edit-proxy progress")]
+[Authenticated]
+public class GetStudioMediaInfo
+{
+    public string ItemId { get; set; } = "";
+}
+
+[Route("/OpenLightFX/Studio/Items/{ItemId}/Frame", "GET", Description = "One sRGB PNG frame for the eyedropper")]
+[Authenticated(Roles = "Admin")]
+public class GetStudioFrame
+{
+    public string ItemId { get; set; } = "";
+    public long? TimeMs { get; set; }
+    public int? MaxWidth { get; set; }
+}
+
+[Route("/OpenLightFX/Studio/Items/{ItemId}/Proxy", "POST", Description = "Start the H.264 edit proxy")]
+[Authenticated(Roles = "Admin")]
+public class PostStudioProxy
+{
+    public string ItemId { get; set; } = "";
+}
+
+[Route("/OpenLightFX/Studio/Items/{ItemId}/Proxy/Media", "GET", Description = "Direct-play the edit proxy")]
+[Authenticated]
+public class GetStudioProxyMedia
+{
+    public string ItemId { get; set; } = "";
+}
+
 [Route("/OpenLightFX/Studio/Tracks", "GET", Description = "List .lightfx tracks Studio can edit for a movie")]
 [Authenticated]
 public class GetStudioTracks : IReturn<List<StudioTrackResponse>>
@@ -57,11 +92,29 @@ public class PutStudioTrack : IRequiresRequestStream, IReturn<StudioTrackRespons
     public Stream? RequestStream { get; set; }
 }
 
+[Route("/OpenLightFX/Studio/Projects/{TrackId}", "GET", Description = "Read the Studio project sidecar")]
+[Authenticated]
+public class GetStudioProject
+{
+    public string TrackId { get; set; } = "";
+    public string? ItemId { get; set; }
+}
+
+[Route("/OpenLightFX/Studio/Projects/{TrackId}", "PUT", Description = "Store the Studio project sidecar")]
+[Authenticated(Roles = "Admin")]
+public class PutStudioProject : IRequiresRequestStream
+{
+    public string TrackId { get; set; } = "";
+    public string? ItemId { get; set; }
+    public Stream? RequestStream { get; set; }
+}
+
 [Route("/OpenLightFX/Studio/Preview/Start", "POST", Description = "Start a live bulb preview")]
 [Authenticated(Roles = "Admin")]
 public class StartStudioPreview : IReturn<StudioPreviewResponse>
 {
     public Dictionary<string, List<string>>? Mapping { get; set; }
+    public bool? Takeover { get; set; }
 }
 
 [Route("/OpenLightFX/Studio/Preview/Frame", "POST", Description = "Send one coalesced preview frame")]
@@ -79,91 +132,178 @@ public class StopStudioPreview : IReturn<StudioPreviewResponse>
 
 // ─── Responses ─────────────────────────────────────────────────────────
 
+[DataContract]
 public class StudioBulbResponse
 {
+    [DataMember(Name = "id")]
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
 
+    [DataMember(Name = "name")]
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
+    [DataMember(Name = "protocol")]
     [JsonPropertyName("protocol")]
     public string Protocol { get; set; } = "";
 
+    [DataMember(Name = "capabilities")]
     [JsonPropertyName("capabilities")]
     public StudioBulbCapabilitiesResponse Capabilities { get; set; } = new();
 }
 
+[DataContract]
 public class StudioBulbCapabilitiesResponse
 {
+    [DataMember(Name = "rgb")]
     [JsonPropertyName("rgb")]
     public bool Rgb { get; set; }
 
+    [DataMember(Name = "minTransitionMs")]
     [JsonPropertyName("minTransitionMs")]
     public int MinTransitionMs { get; set; }
 }
 
+[DataContract]
 public class StudioItemResponse
 {
+    [DataMember(Name = "itemId")]
     [JsonPropertyName("itemId")]
     public string ItemId { get; set; } = "";
 
+    [DataMember(Name = "name")]
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
+    [DataMember(Name = "year")]
     [JsonPropertyName("year")]
     public int Year { get; set; }
 
+    [DataMember(Name = "runtimeMs")]
     [JsonPropertyName("runtimeMs")]
     public long RuntimeMs { get; set; }
 }
 
+[DataContract]
 public class StudioStreamUrlResponse
 {
+    [DataMember(Name = "url")]
     [JsonPropertyName("url")]
     public string Url { get; set; } = "";
 }
 
+[DataContract]
 public class StudioTrackResponse
 {
+    [DataMember(Name = "trackId")]
     [JsonPropertyName("trackId")]
     public string TrackId { get; set; } = "";
 
+    [DataMember(Name = "title")]
     [JsonPropertyName("title")]
     public string Title { get; set; } = "";
 
+    [DataMember(Name = "itemId")]
     [JsonPropertyName("itemId")]
     public string ItemId { get; set; } = "";
 
+    [DataMember(Name = "updatedAt")]
     [JsonPropertyName("updatedAt")]
     public string UpdatedAt { get; set; } = "";
 }
 
+[DataContract]
+public class StudioMediaInfoResponse
+{
+    [DataMember(Name = "runtimeMs")]
+    public long RuntimeMs { get; set; }
+
+    [DataMember(Name = "width")]
+    public int Width { get; set; }
+
+    [DataMember(Name = "height")]
+    public int Height { get; set; }
+
+    [DataMember(Name = "videoCodec")]
+    public string VideoCodec { get; set; } = "";
+
+    [DataMember(Name = "hdr")]
+    public bool Hdr { get; set; }
+
+    [DataMember(Name = "colorTransfer")]
+    public string ColorTransfer { get; set; } = "";
+
+    [DataMember(Name = "audioCodec")]
+    public string AudioCodec { get; set; } = "";
+
+    [DataMember(Name = "proxy")]
+    public StudioProxyStatusResponse Proxy { get; set; } = new();
+}
+
+[DataContract]
+public class StudioProxyStatusResponse
+{
+    [DataMember(Name = "state")]
+    public string State { get; set; } = "missing";
+
+    [DataMember(Name = "encodedThroughMs")]
+    public long EncodedThroughMs { get; set; }
+
+    [DataMember(Name = "fps")]
+    public double Fps { get; set; }
+
+    [DataMember(Name = "keyframeIntervalMs")]
+    public int KeyframeIntervalMs { get; set; }
+
+    [DataMember(Name = "width")]
+    public int Width { get; set; }
+
+    [DataMember(Name = "height")]
+    public int Height { get; set; }
+
+    [DataMember(Name = "editUrl")]
+    public string? EditUrl { get; set; }
+}
+
+[DataContract]
 public class StudioPreviewStateDto
 {
+    [DataMember(Name = "bulbId")]
     [JsonPropertyName("bulbId")]
     public string BulbId { get; set; } = "";
 
+    [DataMember(Name = "r")]
     [JsonPropertyName("r")]
     public int R { get; set; }
 
+    [DataMember(Name = "g")]
     [JsonPropertyName("g")]
     public int G { get; set; }
 
+    [DataMember(Name = "b")]
     [JsonPropertyName("b")]
     public int B { get; set; }
 
+    [DataMember(Name = "brightness")]
     [JsonPropertyName("brightness")]
     public int Brightness { get; set; }
 
+    [DataMember(Name = "transitionMs")]
     [JsonPropertyName("transitionMs")]
     public int TransitionMs { get; set; }
 }
 
+[DataContract]
 public class StudioPreviewResponse
 {
+    [DataMember(Name = "status")]
     [JsonPropertyName("status")]
     public string Status { get; set; } = "";
+
+    /// <summary>False after an idle restore so the next frame is told preview is not active.</summary>
+    [DataMember(Name = "active")]
+    [JsonPropertyName("active")]
+    public bool Active { get; set; } = true;
 }
 
 // ─── Service ───────────────────────────────────────────────────────────
@@ -175,16 +315,18 @@ public class StudioService : IService, IRequiresRequest
     private readonly ILibraryManager _library;
     private readonly ILogger _logger;
     private readonly IHttpResultFactory _results;
+    private readonly IFfmpegManager _ffmpeg;
     private readonly TrackParser _parser = new();
     private readonly ConfigurationService _config = new();
 
     public IRequest Request { get; set; } = null!;
 
-    public StudioService(ILibraryManager library, ILogManager logManager, IHttpResultFactory results)
+    public StudioService(ILibraryManager library, ILogManager logManager, IHttpResultFactory results, IFfmpegManager ffmpeg)
     {
         _library = library;
         _logger = logManager.GetLogger("OpenLightFX.Studio");
         _results = results;
+        _ffmpeg = ffmpeg;
     }
 
     public async Task<object> Get(GetStudioBulbs request)
@@ -265,6 +407,123 @@ public class StudioService : IService, IRequiresRequest
         return new StudioStreamUrlResponse { Url = url };
     }
 
+    public async Task<object> Get(GetStudioMediaInfo request)
+    {
+        var item = RequireItem(request.ItemId);
+        var source = await ProbeAsync(item).ConfigureAwait(false);
+        var job = EnsureProxy(item, source);
+        return ToMediaInfo(item, source, job);
+    }
+
+    public async Task<object> Post(PostStudioProxy request)
+    {
+        var item = RequireItem(request.ItemId);
+        var source = await ProbeAsync(item).ConfigureAwait(false);
+        var job = EnsureProxy(item, source);
+        return new StudioProxyStatusResponse
+        {
+            State = job.State,
+            EncodedThroughMs = job.EncodedThroughMs,
+            Fps = job.Fps,
+            KeyframeIntervalMs = job.KeyframeIntervalMs,
+            Width = job.Width,
+            Height = job.Height,
+            EditUrl = EditUrl(PublicItemId(item))
+        };
+    }
+
+    public async Task<object> Get(GetStudioFrame request)
+    {
+        if (request.TimeMs is not long timeMs)
+            throw new ArgumentException("timeMs is required");
+        if (timeMs < 0)
+            throw new ArgumentException("timeMs is past the runtime");
+
+        var item = RequireItem(request.ItemId);
+        if (string.IsNullOrEmpty(item.Path))
+            throw new ArgumentException("Item has no media file");
+
+        var source = await ProbeAsync(item).ConfigureAwait(false);
+        if (source.RuntimeMs > 0 && timeMs > source.RuntimeMs)
+            throw new ArgumentException("timeMs is past the runtime");
+
+        var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
+        var arguments = StudioFramePlan.Arguments(item.Path, timeMs, source.Hdr, source.ColorTransfer, request.MaxWidth);
+        var (code, png, log) = await StudioProcess.RunAsync(ffmpeg, arguments, CancellationToken.None).ConfigureAwait(false);
+        if (code != 0 || png.Length < 8 || png[0] != 0x89)
+            throw new ServiceUnavailableException("Frame extraction failed");
+
+        var actual = StudioFramePlan.SourceTimeMs(log, timeMs);
+        return _results.GetResult(
+            Request,
+            new ReadOnlyMemory<byte>(png),
+            "image/png",
+            new Dictionary<string, string>
+            {
+                ["X-OpenLightFX-Tone-Map"] = StudioFramePlan.ToneMap(source.Hdr),
+                ["X-OpenLightFX-Source-Time-Ms"] = actual.ToString(CultureInfo.InvariantCulture),
+                ["Cache-Control"] = "no-cache"
+            });
+    }
+
+    public async Task<object> Get(GetStudioProxyMedia request)
+    {
+        var item = RequireItem(request.ItemId);
+        var source = await ProbeAsync(item).ConfigureAwait(false);
+        var job = EnsureProxy(item, source);
+        var range = Request?.Headers?["Range"];
+        var length = await WaitForRangeAsync(job, range).ConfigureAwait(false);
+        var slice = StudioByteRange.Resolve(range, length);
+        if (slice.Status == 416)
+        {
+            var text = Encoding.UTF8.GetBytes($"edit copy has reached {job.EncodedThroughMs} ms");
+            var denied = _results.GetResult(Request, new ReadOnlyMemory<byte>(text), "text/plain", new Dictionary<string, string>
+            {
+                ["Accept-Ranges"] = "bytes"
+            });
+            if (denied is IHttpResult unavailable)
+            {
+                unavailable.StatusCode = HttpStatusCode.RequestedRangeNotSatisfiable;
+                unavailable.Status = 416;
+            }
+            return denied;
+        }
+
+        var count = length == 0 ? 0 : (int)(slice.End - slice.Start + 1);
+        var bytes = new byte[Math.Max(count, 0)];
+        if (count > 0)
+        {
+            using var stream = new FileStream(job.OutputPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            stream.Seek(slice.Start, SeekOrigin.Begin);
+            var read = 0;
+            while (read < bytes.Length)
+            {
+                var n = stream.Read(bytes, read, bytes.Length - read);
+                if (n == 0)
+                    break;
+                read += n;
+            }
+            if (read < bytes.Length)
+                Array.Resize(ref bytes, read);
+        }
+
+        var headers = new Dictionary<string, string>
+        {
+            ["Accept-Ranges"] = "bytes",
+            ["Cache-Control"] = "no-cache"
+        };
+        if (slice.Status == 206 && bytes.Length > 0)
+            headers["Content-Range"] = $"bytes {slice.Start}-{slice.Start + bytes.Length - 1}/{length}";
+
+        var result = _results.GetResult(Request, new ReadOnlyMemory<byte>(bytes), "video/mp4", headers);
+        if (slice.Status == 206 && result is IHttpResult partial)
+        {
+            partial.StatusCode = HttpStatusCode.PartialContent;
+            partial.Status = 206;
+        }
+        return result;
+    }
+
     public object Get(GetStudioTracks request)
     {
         if (string.IsNullOrWhiteSpace(request.ItemId))
@@ -317,6 +576,14 @@ public class StudioService : IService, IRequiresRequest
         var bytes = await ReadBodyAsync(request.RequestStream).ConfigureAwait(false);
         var info = StudioTrackFiles.ParseForSave(_parser, bytes, request.TrackId);
         var path = StudioTrackFiles.GetSavePath(item.Path, request.TrackId);
+        try
+        {
+            StudioTrackFiles.EnsureNoConflict(path, request.TrackId, Request?.Headers?["If-Match"]);
+        }
+        catch (TrackSaveConflictException ex)
+        {
+            throw new ConflictException(ex.Message);
+        }
 
         try
         {
@@ -330,7 +597,7 @@ public class StudioService : IService, IRequiresRequest
 
         ServerEntryPoint.Instance?.TrackDiscoveryService.InvalidateCache(item.Path);
         var itemId = PublicItemId(item);
-        var updated = new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero);
+        var updated = StudioTrackFiles.UpdatedAtToken(path);
         IndexOrNull()?.Remember(request.TrackId, itemId, path);
 
         _logger.Info("Saved Studio track '{0}' for item {1} at '{2}'", request.TrackId, itemId, path);
@@ -339,9 +606,65 @@ public class StudioService : IService, IRequiresRequest
             TrackId = request.TrackId,
             Title = info.Title,
             ItemId = itemId,
-            UpdatedAt = updated.UtcDateTime.ToString("o")
+            UpdatedAt = updated
         };
     }
+
+    public object Get(GetStudioProject request)
+    {
+        if (string.IsNullOrWhiteSpace(request.ItemId))
+            throw new ArgumentException("itemId is required");
+        if (!StudioTrackFiles.IsSafeTrackId(request.TrackId))
+            throw new ArgumentException("trackId contains unsupported characters");
+
+        var item = RequireItem(request.ItemId);
+        if (string.IsNullOrEmpty(item.Path))
+            throw new ResourceNotFoundException("Item has no file path");
+
+        var path = StudioSidecar.GetPath(item.Path, request.TrackId);
+        if (!File.Exists(path))
+            throw new ResourceNotFoundException("Project sidecar not found");
+
+        var bytes = File.ReadAllBytes(path);
+        return JsonResult(bytes);
+    }
+
+    public async Task<object> Put(PutStudioProject request)
+    {
+        if (string.IsNullOrWhiteSpace(request.ItemId))
+            throw new ArgumentException("itemId is required");
+        if (!StudioTrackFiles.IsSafeTrackId(request.TrackId))
+            throw new ArgumentException("trackId contains unsupported characters");
+
+        var item = RequireItem(request.ItemId);
+        if (string.IsNullOrEmpty(item.Path))
+            throw new ArgumentException("Item has no file path to store a project sidecar beside");
+
+        var raw = await ReadLimitedAsync(request.RequestStream, StudioSidecar.MaxBytes, "Project body exceeds 4 MB")
+            .ConfigureAwait(false);
+        var bytes = StudioSidecar.Normalize(raw);
+        var path = StudioSidecar.GetPath(item.Path, request.TrackId);
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, bytes).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new ArgumentException($"Could not save project: {ex.Message}");
+        }
+
+        _logger.Info("Saved Studio sidecar '{0}' for item {1}", request.TrackId, PublicItemId(item));
+        return JsonResult(bytes);
+    }
+
+    private object JsonResult(byte[] json) =>
+        _results.GetResult(
+            Request,
+            new ReadOnlyMemory<byte>(json),
+            "application/json; charset=utf-8",
+            new Dictionary<string, string> { ["Cache-Control"] = "no-cache" });
 
     public async Task<object> Post(StartStudioPreview request)
     {
@@ -349,8 +672,12 @@ public class StudioService : IService, IRequiresRequest
         var mapping = (IReadOnlyDictionary<string, IReadOnlyList<string>>)(request.Mapping ?? new Dictionary<string, List<string>>())
             .ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value);
 
+        if (request.Takeover == true)
+            await entry.SuspendPlaybackLightingAsync().ConfigureAwait(false);
+
         var started = await entry.Preview.TryStartAsync(
             () => entry.ActiveSessionCount > 0,
+            request.Takeover == true,
             mapping,
             LoadBulbs(),
             PhotosensitivityEnabled(),
@@ -358,10 +685,11 @@ public class StudioService : IService, IRequiresRequest
             DateTimeOffset.UtcNow).ConfigureAwait(false);
 
         if (!started)
-            throw new ConflictException("A lighting playback session is active");
+            throw new ConflictException("playback_active");
 
+        RememberMapping(mapping);
         _logger.Info("Studio preview started");
-        return new StudioPreviewResponse { Status = "started" };
+        return new StudioPreviewResponse { Status = "started", Active = true };
     }
 
     public async Task<object> Post(PostStudioPreviewFrame request)
@@ -420,9 +748,181 @@ public class StudioService : IService, IRequiresRequest
         }
 
         if (Guid.TryParse(itemId, out var guid))
-            return _library.GetItemById(guid);
+        {
+            var byGuid = _library.GetItemById(guid);
+            if (byGuid != null)
+                return byGuid;
+        }
 
-        return null;
+        var named = _library.GetItemList(new InternalItemsQuery
+        {
+            IncludeItemTypes = new[] { "Movie" },
+            Recursive = true,
+            SearchTerm = itemId,
+            Limit = 50
+        });
+        return named.FirstOrDefault(item => string.Equals(item.Name, itemId, StringComparison.OrdinalIgnoreCase))
+            ?? named.FirstOrDefault(item => item.Name?.Contains(itemId, StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    private async Task<StudioSourceInfo> ProbeAsync(BaseItem item)
+    {
+        var itemRuntime = item.RunTimeTicks is long ticks && ticks > 0
+            ? ticks / TimeSpan.TicksPerMillisecond
+            : 0;
+        var fallback = new StudioSourceInfo(
+            itemRuntime,
+            item.Width,
+            item.Height,
+            item.VideoCodec ?? "",
+            item.AudioCodec ?? "",
+            false,
+            "",
+            24);
+
+        if (string.IsNullOrEmpty(item.Path))
+            return fallback;
+
+        var ffprobe = FfprobePath();
+        if (string.IsNullOrEmpty(ffprobe) || !File.Exists(ffprobe))
+            return fallback;
+
+        var (code, stdout, _) = await StudioProcess.RunAsync(
+            ffprobe,
+            new[] { "-v", "error", "-print_format", "json", "-show_streams", "-show_format", item.Path },
+            CancellationToken.None).ConfigureAwait(false);
+        if (code != 0 || stdout.Length == 0)
+            return fallback;
+
+        var parsed = StudioFfprobe.Parse(Encoding.UTF8.GetString(stdout), itemRuntime);
+        return parsed with
+        {
+            Width = parsed.Width > 0 ? parsed.Width : item.Width,
+            Height = parsed.Height > 0 ? parsed.Height : item.Height,
+            VideoCodec = parsed.VideoCodec.Length > 0 ? parsed.VideoCodec : item.VideoCodec ?? "",
+            AudioCodec = parsed.AudioCodec.Length > 0 ? parsed.AudioCodec : item.AudioCodec ?? ""
+        };
+    }
+
+    private StudioProxyJob EnsureProxy(BaseItem item, StudioSourceInfo source)
+    {
+        var itemId = PublicItemId(item);
+        return StudioProxyCache.GetOrAdd(itemId, () =>
+        {
+            var directory = Path.Combine(
+                Plugin.Instance?.DataFolderPath ?? Path.GetTempPath(),
+                "studio-proxy");
+            Directory.CreateDirectory(directory);
+            var output = Path.Combine(directory, SafeFileToken(itemId) + ".mp4");
+            var (width, height) = OutputSize(source.Width, source.Height);
+            var job = new StudioProxyJob(itemId, output, source.Fps, width, height);
+            if (File.Exists(output) && new FileInfo(output).Length > 0)
+            {
+                job.MarkReady(source.RuntimeMs);
+                return job;
+            }
+
+            if (string.IsNullOrEmpty(item.Path))
+            {
+                job.MarkFailed();
+                return job;
+            }
+
+            try
+            {
+                job.Start(RequireTool(FfmpegPath(), "ffmpeg"), StudioProxyPlan.Arguments(item.Path, output, source.Fps));
+            }
+            catch (Exception ex)
+            {
+                _logger.ErrorException("Edit proxy failed to start for {0}", ex, itemId);
+                job.MarkFailed();
+            }
+            return job;
+        });
+    }
+
+    private StudioMediaInfoResponse ToMediaInfo(BaseItem item, StudioSourceInfo source, StudioProxyJob job) => new()
+    {
+        RuntimeMs = source.RuntimeMs,
+        Width = source.Width,
+        Height = source.Height,
+        VideoCodec = source.VideoCodec,
+        Hdr = source.Hdr,
+        ColorTransfer = source.ColorTransfer,
+        AudioCodec = source.AudioCodec,
+        Proxy = new StudioProxyStatusResponse
+        {
+            State = job.State == "failed" ? "building" : job.State,
+            EncodedThroughMs = job.EncodedThroughMs,
+            Fps = job.Fps,
+            KeyframeIntervalMs = job.KeyframeIntervalMs,
+            Width = job.Width,
+            Height = job.Height,
+            EditUrl = EditUrl(PublicItemId(item))
+        }
+    };
+
+    private string EditUrl(string itemId) =>
+        StudioEditUrls.ProxyMedia(Request?.AbsoluteUri, itemId, StudioStreamUrls.ReadAccessToken(Request));
+
+    private string? FfmpegPath() => _ffmpeg.FfmpegConfiguration?.EncoderPath;
+
+    private string? FfprobePath()
+    {
+        var detect = _ffmpeg.FfmpegConfiguration?.DetectPath;
+        if (!string.IsNullOrEmpty(detect) && File.Exists(detect))
+            return detect;
+        var ffmpeg = FfmpegPath();
+        if (string.IsNullOrEmpty(ffmpeg))
+            return detect;
+        var sibling = Path.Combine(Path.GetDirectoryName(ffmpeg) ?? "", "ffprobe");
+        return File.Exists(sibling) ? sibling : detect;
+    }
+
+    private static string RequireTool(string? path, string name)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            throw new ServiceUnavailableException($"Emby {name} is not available");
+        return path;
+    }
+
+    private static async Task<long> WaitForRangeAsync(StudioProxyJob job, string? range)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(4);
+        long length = 0;
+        while (true)
+        {
+            length = File.Exists(job.OutputPath) ? new FileInfo(job.OutputPath).Length : 0;
+            var slice = StudioByteRange.Resolve(range, length);
+            if (slice.Status == 416)
+                return length;
+            if (length > slice.End)
+                return length;
+            if (DateTime.UtcNow >= deadline)
+                return length;
+            await Task.Delay(50).ConfigureAwait(false);
+        }
+    }
+
+    private static (int Width, int Height) OutputSize(int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+            return (1280, 720);
+        var scale = Math.Max(width, height) > StudioProxyPlan.MaxLongSide
+            ? StudioProxyPlan.MaxLongSide / (double)Math.Max(width, height)
+            : 1;
+        var outWidth = Even(Math.Max(2, (int)Math.Round(width * scale)));
+        var outHeight = Even(Math.Max(2, (int)Math.Round(height * scale)));
+        return (outWidth, outHeight);
+    }
+
+    private static int Even(int value) => value % 2 == 0 ? value : value - 1;
+
+    private static string SafeFileToken(string itemId)
+    {
+        var chars = itemId.Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_').ToArray();
+        var token = new string(chars);
+        return token.Length == 0 ? "item" : token;
     }
 
     private static string PublicItemId(BaseItem item) =>
@@ -438,6 +938,21 @@ public class StudioService : IService, IRequiresRequest
 
     private bool PhotosensitivityEnabled() =>
         Plugin.Instance?.GetPluginOptions().PhotosensitivityMode == true;
+
+    private static void RememberMapping(IReadOnlyDictionary<string, IReadOnlyList<string>> mapping)
+    {
+        var plugin = Plugin.Instance;
+        if (plugin == null || mapping.Count == 0)
+            return;
+
+        plugin.UpdateOptions(options =>
+        {
+            options.MappingProfilesJson = StudioMappingProfiles.WithChannels(
+                options.MappingProfilesJson,
+                options.ActiveProfileName,
+                mapping);
+        });
+    }
 
     private List<StudioListedTrack> Discover(BaseItem item)
     {
@@ -486,10 +1001,13 @@ public class StudioService : IService, IRequiresRequest
         return null;
     }
 
-    private static async Task<byte[]> ReadBodyAsync(Stream? stream)
+    private static Task<byte[]> ReadBodyAsync(Stream? stream) =>
+        ReadLimitedAsync(stream, StudioTrackFiles.MaxTrackBytes, "V-001: Track body exceeds 32 MB");
+
+    private static async Task<byte[]> ReadLimitedAsync(Stream? stream, int maxBytes, string tooLarge)
     {
         if (stream == null)
-            throw new ArgumentException("Track body is empty");
+            throw new ArgumentException("V-001: Track body is empty");
 
         using var buffer = new MemoryStream();
         var chunk = new byte[81920];
@@ -498,8 +1016,8 @@ public class StudioService : IService, IRequiresRequest
             var read = await stream.ReadAsync(chunk).ConfigureAwait(false);
             if (read == 0)
                 break;
-            if (buffer.Length + read > StudioTrackFiles.MaxTrackBytes)
-                throw new ArgumentException("Track body exceeds 32 MB");
+            if (buffer.Length + read > maxBytes)
+                throw new ArgumentException(tooLarge);
             buffer.Write(chunk, 0, read);
         }
 

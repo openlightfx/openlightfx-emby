@@ -29,7 +29,7 @@ chmod +x scripts/fetch-sdk.sh
 ./scripts/fetch-sdk.sh
 ```
 
-This copies the required Emby SDK DLLs from the server to `lib/`. Set `EMBY_HOST` to override the default server address (`192.168.1.3`).
+This copies the Emby 4.9.3.0 SDK DLLs into `lib/` (gitignored). It extracts them from `emby/embyserver:4.9.3.0` (`/system`) when Docker is available, and otherwise downloads the official `emby-server-deb_4.9.3.0_amd64.deb` of the same build. Set `EMBY_VERSION` to pin a different server version.
 
 ### 2. Build
 
