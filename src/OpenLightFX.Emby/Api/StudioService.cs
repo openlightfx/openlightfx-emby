@@ -80,6 +80,7 @@ public class PutStudioProject : IRequiresRequestStream
 public class StartStudioPreview : IReturn<StudioPreviewResponse>
 {
     public Dictionary<string, List<string>>? Mapping { get; set; }
+    public bool? Takeover { get; set; }
 }
 
 [Route("/OpenLightFX/Studio/Preview/Frame", "POST", Description = "Send one coalesced preview frame")]
@@ -465,8 +466,12 @@ public class StudioService : IService, IRequiresRequest
         var mapping = (IReadOnlyDictionary<string, IReadOnlyList<string>>)(request.Mapping ?? new Dictionary<string, List<string>>())
             .ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value);
 
+        if (request.Takeover == true)
+            await entry.SuspendPlaybackLightingAsync().ConfigureAwait(false);
+
         var started = await entry.Preview.TryStartAsync(
             () => entry.ActiveSessionCount > 0,
+            request.Takeover == true,
             mapping,
             LoadBulbs(),
             PhotosensitivityEnabled(),
@@ -474,10 +479,11 @@ public class StudioService : IService, IRequiresRequest
             DateTimeOffset.UtcNow).ConfigureAwait(false);
 
         if (!started)
-            throw new ConflictException("A lighting playback session is active");
+            throw new ConflictException("playback_active");
 
+        RememberMapping(mapping);
         _logger.Info("Studio preview started");
-        return new StudioPreviewResponse { Status = "started" };
+        return new StudioPreviewResponse { Status = "started", Active = true };
     }
 
     public async Task<object> Post(PostStudioPreviewFrame request)
@@ -554,6 +560,21 @@ public class StudioService : IService, IRequiresRequest
 
     private bool PhotosensitivityEnabled() =>
         Plugin.Instance?.GetPluginOptions().PhotosensitivityMode == true;
+
+    private static void RememberMapping(IReadOnlyDictionary<string, IReadOnlyList<string>> mapping)
+    {
+        var plugin = Plugin.Instance;
+        if (plugin == null || mapping.Count == 0)
+            return;
+
+        plugin.UpdateOptions(options =>
+        {
+            options.MappingProfilesJson = StudioMappingProfiles.WithChannels(
+                options.MappingProfilesJson,
+                options.ActiveProfileName,
+                mapping);
+        });
+    }
 
     private List<StudioListedTrack> Discover(BaseItem item)
     {

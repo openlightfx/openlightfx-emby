@@ -45,6 +45,7 @@ public sealed class StudioPreviewHost : IAsyncDisposable
 
     public async Task<bool> TryStartAsync(
         Func<bool> playbackActive,
+        bool takeover,
         IReadOnlyDictionary<string, IReadOnlyList<string>> mapping,
         IReadOnlyList<BulbConfig> bulbs,
         bool photosensitivity,
@@ -54,7 +55,7 @@ public sealed class StudioPreviewHost : IAsyncDisposable
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (playbackActive())
+            if (playbackActive() && !takeover)
                 return false;
 
             await StopCoreAsync().ConfigureAwait(false);

@@ -237,6 +237,44 @@ public class StudioPreviewTests
         Assert.Equal(new[] { false }, driver.Power);
     }
 
+    [Fact(DisplayName = "PREV-006 @fixture a preview frame reaches the bulb")]
+    public async Task Preview_frame_reaches_the_bulb()
+    {
+        var driver = new FakeDriver
+        {
+            Capabilities = new BulbCapabilityProfile(true, true, 2000, 6500, MinTransitionMs: 0, MaxCommandsPerSecond: 20)
+        };
+        var session = await Session(driver, photosensitivity: false);
+
+        await session.SubmitFrameAsync(new[] { new StudioPreviewSample("b1", 255, 0, 0, 100, 0) }, T0);
+
+        var sent = Assert.Single(driver.States);
+        Assert.Equal((byte)255, sent.R);
+        Assert.Equal((byte)0, sent.G);
+        Assert.Equal((byte)0, sent.B);
+        Assert.Equal(100u, sent.Brightness);
+        Assert.Equal(0u, sent.TransitionMs);
+        await session.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "PLUG-005 @fixture takeover starts while playback is active")]
+    public async Task Takeover_starts_while_playback_is_active()
+    {
+        var host = new StudioPreviewHost(startPump: false);
+        var started = await host.TryStartAsync(
+            playbackActive: () => true,
+            takeover: true,
+            mapping: new Dictionary<string, IReadOnlyList<string>> { ["left"] = new[] { "b1" } },
+            bulbs: new[] { Bulb("b1") },
+            photosensitivity: false,
+            createDriver: _ => new FakeDriver(),
+            now: T0);
+
+        Assert.True(started);
+        Assert.True(host.IsActive);
+        await host.DisposeAsync();
+    }
+
     [Fact]
     public async Task Refuses_to_start_while_playback_is_active()
     {
@@ -245,6 +283,7 @@ public class StudioPreviewTests
 
         var started = await host.TryStartAsync(
             playbackActive: () => true,
+            takeover: false,
             mapping: new Dictionary<string, IReadOnlyList<string>> { ["left"] = new[] { "b1" } },
             bulbs: new[] { Bulb("b1") },
             photosensitivity: false,
@@ -266,6 +305,7 @@ public class StudioPreviewTests
         var host = new StudioPreviewHost(startPump: false);
         await Assert.ThrowsAsync<ArgumentException>(() => host.TryStartAsync(
             () => false,
+            takeover: false,
             new Dictionary<string, IReadOnlyList<string>> { ["left"] = new[] { "missing" } },
             new[] { Bulb("b1") },
             false,

@@ -43,6 +43,7 @@ public class ServerEntryPoint : IServerEntryPoint
 
     // Active lighting sessions keyed by Emby session ID
     private readonly ConcurrentDictionary<string, PlaybackSession> _sessions = new();
+    private int _playbackLightingSuspended;
 
     // Per-session lighting enabled toggle (EMB-152)
     private readonly ConcurrentDictionary<string, bool> _lightingEnabled = new();
@@ -148,6 +149,8 @@ public class ServerEntryPoint : IServerEntryPoint
                 return;
             }
 
+            // A new Emby play is allowed to own the bulbs again after a Studio takeover.
+            Interlocked.Exchange(ref _playbackLightingSuspended, 0);
             var deviceId = e.Session?.DeviceId;
             _ = TryStartLightingSession(sessionId, item, deviceId);
         }
@@ -249,6 +252,12 @@ public class ServerEntryPoint : IServerEntryPoint
     {
         try
         {
+            if (Volatile.Read(ref _playbackLightingSuspended) != 0)
+            {
+                _logger.Info("Lighting stays off for session {0}; Studio preview took the bulbs", sessionId);
+                return;
+            }
+
             _logger.Info("Starting lighting session: session={0}, item={1}, device={2}",
                 sessionId, item.Name, deviceId ?? "(global)");
 
@@ -390,6 +399,22 @@ public class ServerEntryPoint : IServerEntryPoint
     }
 
     // ─── Public API (accessed by REST endpoints) ──────────────────────
+
+    /// <summary>
+    /// Stop playback lighting so Studio can drive the bulbs. Progress events do not
+    /// start it again until Emby fires a new playback start.
+    /// </summary>
+    public async Task SuspendPlaybackLightingAsync()
+    {
+        Interlocked.Exchange(ref _playbackLightingSuspended, 1);
+        foreach (var sessionId in _sessions.Keys.ToArray())
+        {
+            if (!_sessions.TryRemove(sessionId, out var session))
+                continue;
+            try { await session.StopAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.Warn("Error stopping lighting for takeover: {0}", ex.Message); }
+        }
+    }
 
     public int ActiveSessionCount => _sessions.Count;
     public IEnumerable<string> ActiveSessionIds => _sessions.Keys;
