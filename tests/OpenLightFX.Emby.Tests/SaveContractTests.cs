@@ -68,28 +68,32 @@ public class SaveContractTests
         Assert.Contains(parsed.ValidationErrors, message => message.StartsWith("V-004", StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "ERR-003 @fixture replacing a track without If-Match is a conflict")]
-    public void Replace_without_if_match_conflicts()
+    [Fact(DisplayName = "ERR-003 @fixture a replace with a missing or stale If-Match is a conflict")]
+    public void Replace_without_a_current_if_match_conflicts()
     {
         var root = Directory.CreateTempSubdirectory("olfx-conflict-");
         try
         {
             var movie = Path.Combine(root.FullName, "Clip.mkv");
             File.WriteAllBytes(movie, new byte[] { 0 });
-            var path = StudioTrackFiles.GetSavePath(movie, "proxy-fixture");
+            var path = StudioTrackFiles.GetSavePath(movie, "conflict");
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+            StudioTrackFiles.EnsureNoConflict(path, ifMatch: null);
+
             File.WriteAllBytes(path, new byte[] { 1 });
+            var token = StudioTrackFiles.UpdatedAtToken(path);
 
-            var conflict = Assert.Throws<TrackSaveConflictException>(() =>
-                StudioTrackFiles.EnsureNoConflict(path, "proxy-fixture", ifMatch: null));
-            Assert.Contains("conflict", conflict.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains(StudioTrackFiles.UpdatedAtToken(path), conflict.Message);
+            var missing = Assert.Throws<TrackSaveConflictException>(() =>
+                StudioTrackFiles.EnsureNoConflict(path, ifMatch: null));
+            Assert.Contains("conflict", missing.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(token, missing.Message);
 
-            StudioTrackFiles.EnsureNoConflict(path, "proxy-fixture", StudioTrackFiles.UpdatedAtToken(path));
+            var stale = Assert.Throws<TrackSaveConflictException>(() =>
+                StudioTrackFiles.EnsureNoConflict(path, "2000-01-01T00:00:00.0000000Z"));
+            Assert.Contains(token, stale.Message);
 
-            var probe = Assert.Throws<TrackSaveConflictException>(() =>
-                StudioTrackFiles.EnsureNoConflict(Path.Combine(root.FullName, "missing.lightfx"), "conflict", ifMatch: null));
-            Assert.False(string.IsNullOrWhiteSpace(probe.Message));
+            StudioTrackFiles.EnsureNoConflict(path, token);
         }
         finally
         {
