@@ -13,6 +13,7 @@ using OpenLightFX.Emby.Effects;
 using OpenLightFX.Emby.Engine;
 using OpenLightFX.Emby.Models;
 using OpenLightFX.Emby.Services;
+using OpenLightFX.Emby.Studio;
 using OpenLightFX.Emby.Utilities;
 using Openlightfx;
 using System.Collections.Concurrent;
@@ -52,6 +53,9 @@ public class ServerEntryPoint : IServerEntryPoint
     // Playback position polling timer
     private System.Timers.Timer? _pollTimer;
 
+    private readonly StudioPreviewHost _preview = new();
+    private readonly StudioTrackIndex _studioTrackIndex;
+
     public ServerEntryPoint(
         ISessionManager sessionManager,
         ILibraryManager libraryManager,
@@ -72,6 +76,8 @@ public class ServerEntryPoint : IServerEntryPoint
         _discoveredBulbStore = new DiscoveredBulbStore();
         _discoveryCoordinator = new DiscoveryCoordinator();
         _identifyService = new IdentifyService();
+        _studioTrackIndex = new StudioTrackIndex(
+            Path.Combine(appPaths.DataPath, "openlightfx-studio-tracks.json"));
 
         Instance = this;
     }
@@ -107,6 +113,15 @@ public class ServerEntryPoint : IServerEntryPoint
 
         _pollTimer?.Stop();
         _pollTimer?.Dispose();
+
+        try
+        {
+            _preview.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn("Error stopping Studio preview: {0}", ex.Message);
+        }
 
         foreach (var session in _sessions.Values)
             session.StopAsync().GetAwaiter().GetResult();
@@ -348,12 +363,25 @@ public class ServerEntryPoint : IServerEntryPoint
 
             var session = new PlaybackSession(trackInfo, bulbs, profile, options, _effectFactory, _logger);
 
-            if (_sessions.TryAdd(sessionId, session))
+            await _preview.ExclusiveAsync(async () =>
             {
-                await session.StartAsync();
-                _logger.Info("Lighting session started for '{0}' (track: '{1}', {2} channels, {3} keyframes)",
-                    item.Name, trackInfo.Title, trackInfo.ChannelCount, trackInfo.KeyframeCount);
-            }
+                // Preview and playback both own bulb drivers. Stop preview before taking them.
+                await _preview.StopCoreAsync();
+                if (!_sessions.TryAdd(sessionId, session))
+                    return;
+
+                try
+                {
+                    await session.StartAsync();
+                    _logger.Info("Lighting session started for '{0}' (track: '{1}', {2} channels, {3} keyframes)",
+                        item.Name, trackInfo.Title, trackInfo.ChannelCount, trackInfo.KeyframeCount);
+                }
+                catch
+                {
+                    _sessions.TryRemove(sessionId, out _);
+                    throw;
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -373,6 +401,8 @@ public class ServerEntryPoint : IServerEntryPoint
     public DiscoveryCoordinator DiscoveryCoordinator => _discoveryCoordinator;
     public IdentifyService IdentifyService => _identifyService;
     public ILibraryManager LibraryManager => _libraryManager;
+    public StudioPreviewHost Preview => _preview;
+    public StudioTrackIndex StudioTrackIndex => _studioTrackIndex;
 
     /// <summary>Get lighting enabled state for a session (EMB-152).</summary>
     public bool IsLightingEnabled(string sessionId) =>

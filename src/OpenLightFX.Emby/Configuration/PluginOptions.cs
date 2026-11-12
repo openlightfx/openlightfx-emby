@@ -9,7 +9,7 @@ public class PluginOptions : EditableOptionsBase
     public override string EditorTitle => "OpenLightFX Settings";
     public override string EditorDescription => "Configure smart bulb ambient lighting for movie playback. " +
         "Use the Bulb Setup Wizard at openlightfx.com/config to discover and configure bulbs, " +
-        "then paste the exported JSON below.";
+        "then paste the exported JSON below. Open the track editor at /emby/OpenLightFX/studio/.";
 
     // --- Bulb Configuration ---
     [DisplayName("Bulb Configuration JSON")]

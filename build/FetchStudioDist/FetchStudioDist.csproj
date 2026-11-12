@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- The plugin build runs this helper with `dotnet run`. Major lets a machine
+         that only has a newer runtime (for example .NET 10) launch the net8.0 output. -->
+    <RollForward>Major</RollForward>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>OpenLightFX.Build</RootNamespace>
+  </PropertyGroup>
+</Project>

@@ -3,6 +3,7 @@ namespace OpenLightFX.Emby.Api;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Plugins;
+using OpenLightFX.Emby.Studio;
 using System.Text;
 
 public class LightTracksPage : IPluginConfigurationPage
@@ -63,6 +64,15 @@ public class LightTracksPage : IPluginConfigurationPage
         }
         sb.AppendLine("</div>");
 
+        sb.AppendLine("<div class=\"info\">");
+        sb.AppendLine("<strong>OpenLightFX Studio:</strong> ");
+        sb.AppendLine($"<a href=\"{StudioPaths.PublicUrl}\" target=\"_blank\" rel=\"noopener\" style=\"color: #52b54b;\">Open the track editor</a>");
+        sb.AppendLine("<p class=\"note\" style=\"margin: 8px 0 0;\">Served by this plugin at <code>/emby/OpenLightFX/studio/</code>. ");
+        sb.AppendLine("Open it with your access token on the first request (<code>?api_key=</code> or <code>X-Emby-Token</code>). ");
+        sb.AppendLine("The plugin then sets an HttpOnly cookie so Studio's scripts and styles can load. ");
+        sb.AppendLine("Saving tracks and live preview require an administrator.</p>");
+        sb.AppendLine("</div>");
+
         // Instructions
         sb.AppendLine("<h2>Track Management</h2>");
         sb.AppendLine("<p>Light tracks are discovered automatically from your movie library. ");
@@ -81,6 +91,14 @@ public class LightTracksPage : IPluginConfigurationPage
         sb.AppendLine("<tr><td><code>/OpenLightFX/Tracks/Select</code></td><td>POST</td><td>Set/clear selected track (JSON body: {itemId, trackPath})</td></tr>");
         sb.AppendLine("<tr><td><code>/OpenLightFX/Status</code></td><td>GET</td><td>Plugin status and statistics</td></tr>");
         sb.AppendLine("<tr><td><code>/OpenLightFX/Bulbs/Test?bulbId={id}</code></td><td>GET</td><td>Test bulb connectivity</td></tr>");
+        sb.AppendLine("<tr><td><code>/OpenLightFX/Studio/Bulbs</code></td><td>GET</td><td>Configured bulbs and capabilities</td></tr>");
+        sb.AppendLine("<tr><td><code>/OpenLightFX/Studio/Items?search=</code></td><td>GET</td><td>Search library movies</td></tr>");
+        sb.AppendLine("<tr><td><code>/OpenLightFX/Studio/Items/{itemId}/StreamUrl</code></td><td>GET</td><td>Browser-playable video URL</td></tr>");
+        sb.AppendLine("<tr><td><code>/OpenLightFX/Studio/Tracks?itemId=</code></td><td>GET</td><td>List tracks for a movie</td></tr>");
+        sb.AppendLine("<tr><td><code>/OpenLightFX/Studio/Tracks/{trackId}</code></td><td>GET/PUT</td><td>Read or save a .lightfx file (admin for PUT)</td></tr>");
+        sb.AppendLine("<tr><td><code>/OpenLightFX/Studio/Preview/Start</code></td><td>POST</td><td>Start live bulb preview (admin)</td></tr>");
+        sb.AppendLine("<tr><td><code>/OpenLightFX/Studio/Preview/Frame</code></td><td>POST</td><td>Send a preview frame (admin)</td></tr>");
+        sb.AppendLine("<tr><td><code>/OpenLightFX/Studio/Preview/Stop</code></td><td>POST</td><td>Stop preview and restore bulbs (admin)</td></tr>");
         sb.AppendLine("</table>");
 
         sb.AppendLine("</body></html>");
