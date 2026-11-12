@@ -1,0 +1,136 @@
+{
+  "sampler": "PlaybackSession",
+  "note": "Black before the first keyframe. Do not compare these cases to InterpolationEngine.GetStateAtTime, which uses the channel default color.",
+  "cases": [
+    {
+      "id": "KEY-009",
+      "timeMs": 750,
+      "keyframes": [
+        {"id": "a", "channelId": "left", "timestampMs": 0, "colorMode": "RGB", "color": {"r": 0, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 0, "transitionMs": 0, "interpolation": "STEP", "powerOn": false},
+        {"id": "b", "channelId": "left", "timestampMs": 1000, "colorMode": "RGB", "color": {"r": 255, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 100, "transitionMs": 500, "interpolation": "STEP", "powerOn": true}
+      ],
+      "expect": {"r": 0, "g": 0, "b": 0, "brightness": 0}
+    },
+    {
+      "id": "KEY-009",
+      "timeMs": 1000,
+      "keyframes": [
+        {"id": "a", "channelId": "left", "timestampMs": 0, "colorMode": "RGB", "color": {"r": 0, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 0, "transitionMs": 0, "interpolation": "STEP", "powerOn": false},
+        {"id": "b", "channelId": "left", "timestampMs": 1000, "colorMode": "RGB", "color": {"r": 255, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 100, "transitionMs": 500, "interpolation": "STEP", "powerOn": true}
+      ],
+      "expect": {"r": 255, "g": 0, "b": 0, "brightness": 100}
+    },
+    {
+      "id": "KEY-010",
+      "timeMs": 499,
+      "keyframes": [
+        {"id": "a", "channelId": "left", "timestampMs": 0, "colorMode": "RGB", "color": {"r": 0, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 0, "transitionMs": 0, "interpolation": "LINEAR", "powerOn": false},
+        {"id": "b", "channelId": "left", "timestampMs": 1000, "colorMode": "RGB", "color": {"r": 255, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 100, "transitionMs": 500, "interpolation": "LINEAR", "powerOn": true}
+      ],
+      "expect": {"r": 0, "g": 0, "b": 0, "brightness": 0}
+    },
+    {
+      "id": "KEY-010",
+      "timeMs": 750,
+      "keyframes": [
+        {"id": "a", "channelId": "left", "timestampMs": 0, "colorMode": "RGB", "color": {"r": 0, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 0, "transitionMs": 0, "interpolation": "LINEAR", "powerOn": false},
+        {"id": "b", "channelId": "left", "timestampMs": 1000, "colorMode": "RGB", "color": {"r": 255, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 100, "transitionMs": 500, "interpolation": "LINEAR", "powerOn": true}
+      ],
+      "expect": {"r": 128, "g": 0, "b": 0, "brightness": 50}
+    },
+    {
+      "id": "KEY-011",
+      "timeMs": 1999,
+      "channelDefault": {"r": 255, "g": 0, "b": 0},
+      "keyframes": [
+        {"id": "only", "channelId": "left", "timestampMs": 2000, "colorMode": "RGB", "color": {"r": 0, "g": 255, "b": 0}, "colorTemperature": 0, "brightness": 40, "transitionMs": 0, "interpolation": "STEP", "powerOn": false}
+      ],
+      "expect": {"r": 0, "g": 0, "b": 0, "brightness": 0}
+    },
+    {
+      "id": "KEY-011",
+      "timeMs": 2000,
+      "keyframes": [
+        {"id": "only", "channelId": "left", "timestampMs": 2000, "colorMode": "RGB", "color": {"r": 0, "g": 255, "b": 0}, "colorTemperature": 0, "brightness": 40, "transitionMs": 0, "interpolation": "STEP", "powerOn": false}
+      ],
+      "expect": {"r": 0, "g": 255, "b": 0, "brightness": 40}
+    },
+    {
+      "id": "KEY-011",
+      "timeMs": 9000,
+      "keyframes": [
+        {"id": "only", "channelId": "left", "timestampMs": 2000, "colorMode": "RGB", "color": {"r": 0, "g": 255, "b": 0}, "colorTemperature": 0, "brightness": 40, "transitionMs": 0, "interpolation": "STEP", "powerOn": false}
+      ],
+      "expect": {"r": 0, "g": 255, "b": 0, "brightness": 40}
+    },
+    {
+      "id": "KEY-011",
+      "timeMs": 999,
+      "keyframes": [
+        {"id": "a", "channelId": "left", "timestampMs": 0, "colorMode": "RGB", "color": {"r": 0, "g": 0, "b": 1}, "colorTemperature": 0, "brightness": 1, "transitionMs": 0, "interpolation": "STEP", "powerOn": false},
+        {"id": "b", "channelId": "left", "timestampMs": 1000, "colorMode": "RGB", "color": {"r": 9, "g": 9, "b": 9}, "colorTemperature": 0, "brightness": 9, "transitionMs": 0, "interpolation": "STEP", "powerOn": false}
+      ],
+      "expect": {"r": 0, "g": 0, "b": 1, "brightness": 1}
+    },
+    {
+      "id": "KEY-011",
+      "timeMs": 1000,
+      "keyframes": [
+        {"id": "a", "channelId": "left", "timestampMs": 0, "colorMode": "RGB", "color": {"r": 0, "g": 0, "b": 1}, "colorTemperature": 0, "brightness": 1, "transitionMs": 0, "interpolation": "STEP", "powerOn": false},
+        {"id": "b", "channelId": "left", "timestampMs": 1000, "colorMode": "RGB", "color": {"r": 9, "g": 9, "b": 9}, "colorTemperature": 0, "brightness": 9, "transitionMs": 0, "interpolation": "STEP", "powerOn": false}
+      ],
+      "expect": {"r": 9, "g": 9, "b": 9, "brightness": 9}
+    },
+    {
+      "id": "KEY-012",
+      "timeMs": 500,
+      "keyframes": [
+        {"id": "warm", "channelId": "left", "timestampMs": 0, "colorMode": "COLOR_TEMPERATURE", "color": {"r": 0, "g": 0, "b": 0}, "colorTemperature": 2700, "brightness": 100, "transitionMs": 0, "interpolation": "LINEAR", "powerOn": false},
+        {"id": "day", "channelId": "left", "timestampMs": 1000, "colorMode": "COLOR_TEMPERATURE", "color": {"r": 0, "g": 0, "b": 0}, "colorTemperature": 6500, "brightness": 100, "transitionMs": 1000, "interpolation": "LINEAR", "powerOn": false}
+      ],
+      "expect": {"r": 255, "g": 219, "b": 191, "brightness": 100, "kelvin": 4600, "mode": "COLOR_TEMPERATURE"}
+    },
+    {
+      "id": "KEY-012",
+      "timeMs": 0,
+      "keyframes": [
+        {"id": "warm", "channelId": "left", "timestampMs": 0, "colorMode": "COLOR_TEMPERATURE", "color": {"r": 0, "g": 0, "b": 0}, "colorTemperature": 2700, "brightness": 100, "transitionMs": 0, "interpolation": "STEP", "powerOn": false}
+      ],
+      "expect": {"r": 255, "g": 166, "b": 87, "kelvin": 2700}
+    },
+    {
+      "id": "KEY-012",
+      "timeMs": 0,
+      "keyframes": [
+        {"id": "day", "channelId": "left", "timestampMs": 0, "colorMode": "COLOR_TEMPERATURE", "color": {"r": 0, "g": 0, "b": 0}, "colorTemperature": 6500, "brightness": 100, "transitionMs": 0, "interpolation": "STEP", "powerOn": false}
+      ],
+      "expect": {"r": 255, "g": 254, "b": 250, "kelvin": 6500}
+    },
+    {
+      "id": "KEY-012",
+      "timeMs": 500,
+      "keyframes": [
+        {"id": "temp", "channelId": "left", "timestampMs": 0, "colorMode": "COLOR_TEMPERATURE", "color": {"r": 0, "g": 0, "b": 0}, "colorTemperature": 2700, "brightness": 100, "transitionMs": 0, "interpolation": "LINEAR", "powerOn": false},
+        {"id": "rgb", "channelId": "left", "timestampMs": 1000, "colorMode": "RGB", "color": {"r": 0, "g": 0, "b": 255}, "colorTemperature": 0, "brightness": 100, "transitionMs": 1000, "interpolation": "LINEAR", "powerOn": false}
+      ],
+      "expect": {"mode": "RGB", "kelvin": 0}
+    },
+    {
+      "id": "KEY-013",
+      "timeMs": 750,
+      "keyframes": [
+        {"id": "a", "channelId": "left", "timestampMs": 0, "colorMode": "RGB", "color": {"r": 0, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 0, "transitionMs": 0, "interpolation": "UNSPECIFIED", "powerOn": false},
+        {"id": "b", "channelId": "left", "timestampMs": 1000, "colorMode": "RGB", "color": {"r": 255, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 100, "transitionMs": 500, "interpolation": "UNSPECIFIED", "powerOn": false}
+      ],
+      "expect": {"r": 128, "g": 0, "b": 0, "brightness": 50}
+    },
+    {
+      "id": "KEY-014",
+      "timeMs": 0,
+      "keyframes": [
+        {"id": "off", "channelId": "left", "timestampMs": 0, "colorMode": "RGB", "color": {"r": 255, "g": 0, "b": 0}, "colorTemperature": 0, "brightness": 100, "transitionMs": 0, "interpolation": "STEP", "powerOn": false}
+      ],
+      "expect": {"r": 255, "g": 0, "b": 0, "brightness": 100, "powerOn": false}
+    }
+  ]
+}

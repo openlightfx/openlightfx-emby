@@ -70,8 +70,43 @@ public static class InterpolationEngine
     }
 
     /// <summary>
+    /// PlaybackSession bracketing. Before the first keyframe the sample is black,
+    /// not the channel default color. After the last keyframe the sample holds it.
+    /// This is the path <see cref="PlaybackSession"/> uses.
+    /// </summary>
+    public static InterpolatedState SampleChannel(IReadOnlyList<Keyframe> channelKeyframes, ulong timeMs)
+    {
+        if (channelKeyframes.Count == 0)
+            return DefaultState();
+
+        // First keyframe strictly after timeMs. A keyframe at timeMs is the previous one.
+        int lo = 0, hi = channelKeyframes.Count - 1;
+        int nextIdx = channelKeyframes.Count;
+        while (lo <= hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            if (channelKeyframes[mid].TimestampMs <= timeMs)
+                lo = mid + 1;
+            else
+            {
+                nextIdx = mid;
+                hi = mid - 1;
+            }
+        }
+
+        if (nextIdx >= channelKeyframes.Count)
+            return KeyframeToState(channelKeyframes[^1]);
+
+        Keyframe next = channelKeyframes[nextIdx];
+        Keyframe? prev = nextIdx > 0 ? channelKeyframes[nextIdx - 1] : null;
+        return Interpolate(prev, next, timeMs);
+    }
+
+    /// <summary>
     /// Finds the bracketing keyframes for the given time and returns the
     /// interpolated state. Uses binary search for efficiency.
+    /// Before the first keyframe this returns the channel default color.
+    /// Playback uses <see cref="SampleChannel"/>, which is black there instead.
     /// </summary>
     public static InterpolatedState GetStateAtTime(
         IReadOnlyList<Keyframe> channelKeyframes, ulong timeMs,
@@ -178,10 +213,17 @@ public static class InterpolationEngine
     }
 
     private static byte LerpByte(byte a, byte b, double t) =>
-        (byte)Math.Clamp(Math.Round(a + (b - (double)a) * t), 0, 255);
+        (byte)Math.Clamp(Math.Round(a + (b - (double)a) * t, MidpointRounding.ToEven), 0, 255);
 
     private static uint LerpUint(uint a, uint b, double t) =>
-        (uint)Math.Max(Math.Round(a + (b - (double)a) * t), 0);
+        (uint)Math.Max(Math.Round(a + (b - (double)a) * t, MidpointRounding.ToEven), 0);
+
+    /// <summary>Clamp to 0–255 and truncate toward zero, matching a C# byte cast of a positive double.</summary>
+    private static byte TruncByte(double value)
+    {
+        var clamped = Math.Clamp(value, 0, 255);
+        return (byte)Math.Truncate(clamped);
+    }
 
     /// <summary>
     /// Approximates RGB values for a color temperature in kelvin
@@ -205,9 +247,6 @@ public static class InterpolationEngine
             b = 255;
         }
 
-        return (
-            (byte)Math.Clamp(r, 0, 255),
-            (byte)Math.Clamp(g, 0, 255),
-            (byte)Math.Clamp(b, 0, 255));
+        return (TruncByte(r), TruncByte(g), TruncByte(b));
     }
 }

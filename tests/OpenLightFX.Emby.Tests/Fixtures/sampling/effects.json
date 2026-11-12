@@ -1,0 +1,1961 @@
+{
+  "source": "TypeScript transcription of openlightfx-emby effect renderers at cursor/studio-host-api-18c1. Regenerate with npx vite-node scripts/fixtures/generate.ts and confirm with the plugin dotnet test.",
+  "cases": [
+    {
+      "name": "LIGHTNING-default",
+      "input": {
+        "effectType": "LIGHTNING",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 50,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 100,
+          "r": 255,
+          "g": 180,
+          "b": 80,
+          "brightness": 40
+        },
+        {
+          "offsetMs": 150,
+          "r": 255,
+          "g": 180,
+          "b": 80,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "LIGHTNING-custom",
+      "input": {
+        "effectType": "LIGHTNING",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {
+          "flash_count": 3
+        }
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 50,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 100,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 150,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 200,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 250,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 300,
+          "r": 255,
+          "g": 180,
+          "b": 80,
+          "brightness": 32
+        },
+        {
+          "offsetMs": 350,
+          "r": 255,
+          "g": 180,
+          "b": 80,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "FLAME-default",
+      "input": {
+        "effectType": "FLAME",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 227,
+          "g": 110,
+          "b": 15,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 62,
+          "r": 226,
+          "g": 107,
+          "b": 14,
+          "brightness": 68
+        },
+        {
+          "offsetMs": 125,
+          "r": 225,
+          "g": 106,
+          "b": 14,
+          "brightness": 68
+        },
+        {
+          "offsetMs": 187,
+          "r": 226,
+          "g": 108,
+          "b": 14,
+          "brightness": 69
+        },
+        {
+          "offsetMs": 250,
+          "r": 228,
+          "g": 111,
+          "b": 15,
+          "brightness": 71
+        },
+        {
+          "offsetMs": 312,
+          "r": 229,
+          "g": 113,
+          "b": 15,
+          "brightness": 72
+        },
+        {
+          "offsetMs": 375,
+          "r": 228,
+          "g": 111,
+          "b": 15,
+          "brightness": 71
+        },
+        {
+          "offsetMs": 437,
+          "r": 226,
+          "g": 108,
+          "b": 14,
+          "brightness": 69
+        },
+        {
+          "offsetMs": 500,
+          "r": 225,
+          "g": 106,
+          "b": 14,
+          "brightness": 68
+        },
+        {
+          "offsetMs": 562,
+          "r": 226,
+          "g": 107,
+          "b": 14,
+          "brightness": 68
+        },
+        {
+          "offsetMs": 625,
+          "r": 227,
+          "g": 110,
+          "b": 15,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 687,
+          "r": 228,
+          "g": 112,
+          "b": 15,
+          "brightness": 71
+        },
+        {
+          "offsetMs": 750,
+          "r": 229,
+          "g": 113,
+          "b": 15,
+          "brightness": 71
+        },
+        {
+          "offsetMs": 812,
+          "r": 228,
+          "g": 111,
+          "b": 15,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 875,
+          "r": 226,
+          "g": 108,
+          "b": 14,
+          "brightness": 68
+        },
+        {
+          "offsetMs": 937,
+          "r": 225,
+          "g": 106,
+          "b": 14,
+          "brightness": 67
+        }
+      ]
+    },
+    {
+      "name": "FLAME-custom",
+      "input": {
+        "effectType": "FLAME",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {
+          "flicker_rate_hz": 4
+        }
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 227,
+          "g": 110,
+          "b": 15,
+          "brightness": 56
+        },
+        {
+          "offsetMs": 125,
+          "r": 226,
+          "g": 107,
+          "b": 14,
+          "brightness": 54
+        },
+        {
+          "offsetMs": 250,
+          "r": 225,
+          "g": 106,
+          "b": 14,
+          "brightness": 54
+        },
+        {
+          "offsetMs": 375,
+          "r": 226,
+          "g": 108,
+          "b": 14,
+          "brightness": 55
+        },
+        {
+          "offsetMs": 500,
+          "r": 228,
+          "g": 111,
+          "b": 15,
+          "brightness": 56
+        },
+        {
+          "offsetMs": 625,
+          "r": 229,
+          "g": 113,
+          "b": 15,
+          "brightness": 57
+        },
+        {
+          "offsetMs": 750,
+          "r": 228,
+          "g": 111,
+          "b": 15,
+          "brightness": 56
+        },
+        {
+          "offsetMs": 875,
+          "r": 226,
+          "g": 108,
+          "b": 14,
+          "brightness": 55
+        }
+      ]
+    },
+    {
+      "name": "FLASHBANG-default",
+      "input": {
+        "effectType": "FLASHBANG",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 100,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "FLASHBANG-custom",
+      "input": {
+        "effectType": "FLASHBANG",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 100,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "EXPLOSION-default",
+      "input": {
+        "effectType": "EXPLOSION",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 160,
+          "b": 30,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 300,
+          "r": 220,
+          "g": 60,
+          "b": 10,
+          "brightness": 50
+        },
+        {
+          "offsetMs": 900,
+          "r": 150,
+          "g": 30,
+          "b": 5,
+          "brightness": 15
+        },
+        {
+          "offsetMs": 1500,
+          "r": 100,
+          "g": 20,
+          "b": 0,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "EXPLOSION-custom",
+      "input": {
+        "effectType": "EXPLOSION",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 160,
+          "b": 30,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 200,
+          "r": 220,
+          "g": 60,
+          "b": 10,
+          "brightness": 40
+        },
+        {
+          "offsetMs": 600,
+          "r": 150,
+          "g": 30,
+          "b": 5,
+          "brightness": 12
+        },
+        {
+          "offsetMs": 1000,
+          "r": 100,
+          "g": 20,
+          "b": 0,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "PULSE-default",
+      "input": {
+        "effectType": "PULSE",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 125,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 14
+        },
+        {
+          "offsetMs": 250,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 50
+        },
+        {
+          "offsetMs": 375,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 85
+        },
+        {
+          "offsetMs": 500,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 625,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 85
+        },
+        {
+          "offsetMs": 750,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 50
+        },
+        {
+          "offsetMs": 875,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 14
+        },
+        {
+          "offsetMs": 1000,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 1125,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 14
+        },
+        {
+          "offsetMs": 1250,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 49
+        },
+        {
+          "offsetMs": 1375,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 85
+        },
+        {
+          "offsetMs": 1500,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 1625,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 85
+        },
+        {
+          "offsetMs": 1750,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 50
+        },
+        {
+          "offsetMs": 1875,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 14
+        }
+      ]
+    },
+    {
+      "name": "PULSE-custom",
+      "input": {
+        "effectType": "PULSE",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {
+          "pulse_rate_hz": 0.5
+        }
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 250,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 11
+        },
+        {
+          "offsetMs": 500,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 40
+        },
+        {
+          "offsetMs": 750,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 68
+        }
+      ]
+    },
+    {
+      "name": "STROBE-default",
+      "input": {
+        "effectType": "STROBE",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 50,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 100,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 150,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 200,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 250,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 300,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 350,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 400,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 450,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 500,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 550,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 600,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 650,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 700,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 750,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 800,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 850,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 900,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 950,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "STROBE-custom",
+      "input": {
+        "effectType": "STROBE",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {
+          "flicker_rate_hz": 4
+        }
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 125,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 250,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 375,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 500,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 625,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 750,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 875,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "SIREN-default",
+      "input": {
+        "effectType": "SIREN",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 0,
+          "b": 0,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 250,
+          "r": 0,
+          "g": 0,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 500,
+          "r": 255,
+          "g": 0,
+          "b": 0,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 750,
+          "r": 0,
+          "g": 0,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 1000,
+          "r": 255,
+          "g": 0,
+          "b": 0,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 1250,
+          "r": 0,
+          "g": 0,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 1500,
+          "r": 255,
+          "g": 0,
+          "b": 0,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 1750,
+          "r": 0,
+          "g": 0,
+          "b": 255,
+          "brightness": 100
+        }
+      ]
+    },
+    {
+      "name": "SIREN-custom",
+      "input": {
+        "effectType": "SIREN",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {
+          "pulse_rate_hz": 0.5
+        }
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 0,
+          "b": 0,
+          "brightness": 80
+        }
+      ]
+    },
+    {
+      "name": "AURORA-default",
+      "input": {
+        "effectType": "AURORA",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 76,
+          "g": 255,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 250,
+          "r": 70,
+          "g": 209,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 500,
+          "r": 64,
+          "g": 162,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 750,
+          "r": 58,
+          "g": 114,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 1000,
+          "r": 52,
+          "g": 66,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 1250,
+          "r": 74,
+          "g": 47,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 1500,
+          "r": 108,
+          "g": 41,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 1750,
+          "r": 137,
+          "g": 36,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 2000,
+          "r": 162,
+          "g": 31,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 2250,
+          "r": 182,
+          "g": 26,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 2500,
+          "r": 195,
+          "g": 22,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 2750,
+          "r": 202,
+          "g": 18,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 3000,
+          "r": 201,
+          "g": 14,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 3250,
+          "r": 192,
+          "g": 11,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 3500,
+          "r": 175,
+          "g": 8,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 3750,
+          "r": 152,
+          "g": 5,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 4000,
+          "r": 122,
+          "g": 3,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 4250,
+          "r": 85,
+          "g": 2,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 4500,
+          "r": 44,
+          "g": 0,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 4750,
+          "r": 0,
+          "g": 1,
+          "b": 255,
+          "brightness": 70
+        }
+      ]
+    },
+    {
+      "name": "AURORA-custom",
+      "input": {
+        "effectType": "AURORA",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": {
+          "r": 0,
+          "g": 255,
+          "b": 180
+        },
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 76,
+          "g": 255,
+          "b": 202,
+          "brightness": 56
+        },
+        {
+          "offsetMs": 250,
+          "r": 70,
+          "g": 255,
+          "b": 245,
+          "brightness": 56
+        },
+        {
+          "offsetMs": 500,
+          "r": 64,
+          "g": 218,
+          "b": 255,
+          "brightness": 56
+        },
+        {
+          "offsetMs": 750,
+          "r": 58,
+          "g": 171,
+          "b": 255,
+          "brightness": 56
+        }
+      ]
+    },
+    {
+      "name": "CANDLE-default",
+      "input": {
+        "effectType": "CANDLE",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 60
+        },
+        {
+          "offsetMs": 100,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 66
+        },
+        {
+          "offsetMs": 200,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 66
+        },
+        {
+          "offsetMs": 300,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 62
+        },
+        {
+          "offsetMs": 400,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 62
+        },
+        {
+          "offsetMs": 500,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 62
+        },
+        {
+          "offsetMs": 600,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 59
+        },
+        {
+          "offsetMs": 700,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 55
+        },
+        {
+          "offsetMs": 800,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 55
+        },
+        {
+          "offsetMs": 900,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 62
+        },
+        {
+          "offsetMs": 1000,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 66
+        },
+        {
+          "offsetMs": 1100,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 65
+        },
+        {
+          "offsetMs": 1200,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 61
+        },
+        {
+          "offsetMs": 1300,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 61
+        },
+        {
+          "offsetMs": 1400,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 60
+        },
+        {
+          "offsetMs": 1500,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 55
+        },
+        {
+          "offsetMs": 1600,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 50
+        },
+        {
+          "offsetMs": 1700,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 52
+        },
+        {
+          "offsetMs": 1800,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 59
+        },
+        {
+          "offsetMs": 1900,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 62
+        },
+        {
+          "offsetMs": 2000,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 61
+        },
+        {
+          "offsetMs": 2100,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 60
+        },
+        {
+          "offsetMs": 2200,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 62
+        },
+        {
+          "offsetMs": 2300,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 61
+        },
+        {
+          "offsetMs": 2400,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 55
+        },
+        {
+          "offsetMs": 2500,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 52
+        },
+        {
+          "offsetMs": 2600,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 56
+        },
+        {
+          "offsetMs": 2700,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 62
+        },
+        {
+          "offsetMs": 2800,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 64
+        },
+        {
+          "offsetMs": 2900,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 63
+        }
+      ]
+    },
+    {
+      "name": "CANDLE-custom",
+      "input": {
+        "effectType": "CANDLE",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 48
+        },
+        {
+          "offsetMs": 100,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 52
+        },
+        {
+          "offsetMs": 200,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 52
+        },
+        {
+          "offsetMs": 300,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 49
+        },
+        {
+          "offsetMs": 400,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 49
+        },
+        {
+          "offsetMs": 500,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 49
+        },
+        {
+          "offsetMs": 600,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 47
+        },
+        {
+          "offsetMs": 700,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 44
+        },
+        {
+          "offsetMs": 800,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 44
+        },
+        {
+          "offsetMs": 900,
+          "r": 255,
+          "g": 170,
+          "b": 80,
+          "brightness": 49
+        }
+      ]
+    },
+    {
+      "name": "GUNFIRE-default",
+      "input": {
+        "effectType": "GUNFIRE",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 30,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 100,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 130,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 200,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 230,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 300,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 330,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 400,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 430,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "GUNFIRE-custom",
+      "input": {
+        "effectType": "GUNFIRE",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {
+          "flash_count": 3
+        }
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 30,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 333,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 363,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 666,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 696,
+          "r": 255,
+          "g": 240,
+          "b": 180,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "NEON-default",
+      "input": {
+        "effectType": "NEON",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 90
+        },
+        {
+          "offsetMs": 380,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 20
+        },
+        {
+          "offsetMs": 400,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 90
+        },
+        {
+          "offsetMs": 597,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 20
+        },
+        {
+          "offsetMs": 617,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 90
+        },
+        {
+          "offsetMs": 747,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 20
+        },
+        {
+          "offsetMs": 767,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 90
+        },
+        {
+          "offsetMs": 1226,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 20
+        },
+        {
+          "offsetMs": 1246,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 90
+        },
+        {
+          "offsetMs": 1678,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 20
+        },
+        {
+          "offsetMs": 1698,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 90
+        }
+      ]
+    },
+    {
+      "name": "NEON-custom",
+      "input": {
+        "effectType": "NEON",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": {
+          "r": 0,
+          "g": 255,
+          "b": 180
+        },
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 0,
+          "g": 255,
+          "b": 180,
+          "brightness": 72
+        },
+        {
+          "offsetMs": 436,
+          "r": 0,
+          "g": 255,
+          "b": 180,
+          "brightness": 16
+        },
+        {
+          "offsetMs": 456,
+          "r": 0,
+          "g": 255,
+          "b": 180,
+          "brightness": 72
+        }
+      ]
+    },
+    {
+      "name": "BREATHING-default",
+      "input": {
+        "effectType": "BREATHING",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 200,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 400,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 2
+        },
+        {
+          "offsetMs": 600,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 9
+        },
+        {
+          "offsetMs": 800,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 20
+        },
+        {
+          "offsetMs": 1000,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 35
+        },
+        {
+          "offsetMs": 1200,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 52
+        },
+        {
+          "offsetMs": 1400,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 1600,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 86
+        },
+        {
+          "offsetMs": 1800,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 96
+        },
+        {
+          "offsetMs": 2000,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 2200,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 96
+        },
+        {
+          "offsetMs": 2400,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 86
+        },
+        {
+          "offsetMs": 2600,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 70
+        },
+        {
+          "offsetMs": 2800,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 52
+        },
+        {
+          "offsetMs": 3000,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 35
+        },
+        {
+          "offsetMs": 3200,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 20
+        },
+        {
+          "offsetMs": 3400,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 9
+        },
+        {
+          "offsetMs": 3600,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 2
+        },
+        {
+          "offsetMs": 3800,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "BREATHING-custom",
+      "input": {
+        "effectType": "BREATHING",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {
+          "pulse_rate_hz": 0.5
+        }
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        },
+        {
+          "offsetMs": 200,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 1
+        },
+        {
+          "offsetMs": 400,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 16
+        },
+        {
+          "offsetMs": 600,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 41
+        },
+        {
+          "offsetMs": 800,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 68
+        }
+      ]
+    },
+    {
+      "name": "SPARK-default",
+      "input": {
+        "effectType": "SPARK",
+        "durationMs": 0,
+        "intensity": 0,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 100
+        },
+        {
+          "offsetMs": 30,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        }
+      ]
+    },
+    {
+      "name": "SPARK-custom",
+      "input": {
+        "effectType": "SPARK",
+        "durationMs": 1000,
+        "intensity": 80,
+        "primaryColor": null,
+        "secondaryColor": null,
+        "params": {}
+      },
+      "commands": [
+        {
+          "offsetMs": 0,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 30,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 0
+        }
+      ]
+    }
+  ]
+}
