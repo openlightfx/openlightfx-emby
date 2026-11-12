@@ -19,8 +19,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="MediaBrowser.Common">
+      <HintPath>..\..\lib\MediaBrowser.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="MediaBrowser.Controller">
+      <HintPath>..\..\lib\MediaBrowser.Controller.dll</HintPath>
+    </Reference>
     <Reference Include="MediaBrowser.Model">
       <HintPath>..\..\lib\MediaBrowser.Model.dll</HintPath>
+    </Reference>
+    <Reference Include="Emby.Web.GenericEdit">
+      <HintPath>..\..\lib\Emby.Web.GenericEdit.dll</HintPath>
     </Reference>
   </ItemGroup>
 </Project>

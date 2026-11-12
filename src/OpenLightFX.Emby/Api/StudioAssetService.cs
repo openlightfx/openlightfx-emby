@@ -52,6 +52,12 @@ public class StudioAssetService : IService, IRequiresRequest
 
     public object Get(GetStudioAsset request)
     {
+        // PathInfo has already lost its trailing slash. RawUrl and AbsoluteUri still
+        // reflect the path the browser used, including an /emby prefix from the proxy.
+        var redirect = StudioRootRedirect.Target(Request?.RawUrl, Request?.AbsoluteUri, Request?.PathInfo);
+        if (redirect != null)
+            return _results.GetRedirectResult(redirect);
+
         var token = RequireToken();
         RememberToken(token);
 
