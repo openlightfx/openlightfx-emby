@@ -12,24 +12,45 @@ public class TrackParser
 
     public TrackInfo Parse(string filePath)
     {
-        var errors = new List<string>();
-        LightFXTrack? track = null;
-
         try
         {
-            var bytes = File.ReadAllBytes(filePath);
-            track = LightFXTrack.Parser.ParseFrom(bytes);
+            return ParseBytes(File.ReadAllBytes(filePath), filePath);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            errors.Add($"Failed to parse protobuf: {ex.Message}");
             return new TrackInfo
             {
                 FilePath = filePath,
                 FileName = Path.GetFileName(filePath),
                 Track = new LightFXTrack(),
                 IsValid = false,
-                ValidationErrors = errors
+                ValidationErrors = new List<string> { $"Failed to read track: {ex.Message}" }
+            };
+        }
+    }
+
+    /// <summary>
+    /// Parse and validate a track from raw .lightfx bytes. <paramref name="filePath"/>
+    /// is the display name or destination path stored on the result; it is not read.
+    /// </summary>
+    public TrackInfo ParseBytes(byte[] data, string filePath)
+    {
+        var errors = new List<string>();
+        LightFXTrack track;
+
+        try
+        {
+            track = LightFXTrack.Parser.ParseFrom(data);
+        }
+        catch (Exception ex)
+        {
+            return new TrackInfo
+            {
+                FilePath = filePath,
+                FileName = Path.GetFileName(filePath),
+                Track = new LightFXTrack(),
+                IsValid = false,
+                ValidationErrors = new List<string> { $"Failed to parse protobuf: {ex.Message}" }
             };
         }
 

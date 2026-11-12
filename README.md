@@ -40,6 +40,16 @@ dotnet build -c Release
 
 The output DLL is at `src/OpenLightFX.Emby/bin/Release/net8.0/OpenLightFX.Emby.dll`.
 
+The build also downloads [OpenLightFX Studio](https://github.com/openlightfx/openlightfx-studio) release asset `openlightfx-studio-dist.zip` and embeds it. `StudioVersion` selects the release (`latest` by default). If no release exists yet, the build embeds a placeholder page and still succeeds.
+
+```bash
+dotnet build -c Release -p:StudioVersion=v1.0.0
+```
+
+```bash
+dotnet test -c Release
+```
+
 ## Deployment
 
 ### Automatic
@@ -89,6 +99,16 @@ The plugin discovers `.lightfx` files using:
 | `/OpenLightFX/Tracks/Select` | POST | Set/clear the selected track |
 | `/OpenLightFX/Status` | GET | Current playback status |
 | `/OpenLightFX/Bulbs/Test?bulbId={id}` | GET | Test bulb connectivity |
+| `/OpenLightFX/Studio/Bulbs` | GET | Configured bulbs and capability profiles |
+| `/OpenLightFX/Studio/Items?search=` | GET | Search library movies |
+| `/OpenLightFX/Studio/Items/{itemId}/StreamUrl` | GET | Browser-playable video URL |
+| `/OpenLightFX/Studio/Tracks?itemId=` | GET | List `.lightfx` tracks for a movie |
+| `/OpenLightFX/Studio/Tracks/{trackId}?itemId=` | GET, PUT | Read or save raw `.lightfx` bytes (PUT is admin-only) |
+| `/OpenLightFX/Studio/Preview/Start` | POST | Start a live bulb preview (admin) |
+| `/OpenLightFX/Studio/Preview/Frame` | POST | Send a preview frame (admin) |
+| `/OpenLightFX/Studio/Preview/Stop` | POST | Stop preview and restore bulbs (admin) |
+
+Studio's static editor is served at `/emby/OpenLightFX/studio/` (Emby also exposes the same route at `/OpenLightFX/studio/`). The dist should use relative asset URLs, or base `/emby/OpenLightFX/studio/`. The first request must carry an Emby access token (`?api_key=` or `X-Emby-Token`); the plugin sets an HttpOnly cookie so the SPA's scripts and styles load. API calls use `X-Emby-Token`. Saving tracks and preview require an administrator. A `<video>` element cannot send that header, so `StreamUrl` appends the token as `api_key`.
 
 ## Architecture
 

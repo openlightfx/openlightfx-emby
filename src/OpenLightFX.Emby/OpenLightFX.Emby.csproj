@@ -42,4 +42,27 @@
     <Protobuf Include="Proto/lightfx.proto" GrpcServices="None" />
   </ItemGroup>
 
+  <!--
+    StudioVersion selects the openlightfx-studio GitHub Release whose
+    openlightfx-studio-dist.zip asset is embedded. "latest" follows the
+    newest release. A missing release embeds a placeholder page instead
+    of failing the build. Override with: dotnet build -p:StudioVersion=v1.2.3
+  -->
+  <PropertyGroup>
+    <StudioVersion Condition="'$(StudioVersion)' == ''">latest</StudioVersion>
+    <!-- Set inside the target. IntermediateOutputPath is still empty while this file is read. -->
+    <StudioDistZip>$(MSBuildProjectDirectory)/obj/studio-dist/openlightfx-studio-dist.zip</StudioDistZip>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(StudioDistZip)">
+      <LogicalName>OpenLightFX.Emby.Studio.dist.zip</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <Target Name="FetchOpenLightFXStudio" BeforeTargets="PrepareResourceNames;CoreCompile">
+    <MakeDir Directories="$(MSBuildProjectDirectory)/obj/studio-dist" />
+    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\..\build\FetchStudioDist\FetchStudioDist.csproj&quot; -c Release -- &quot;$(StudioVersion)&quot; &quot;$(StudioDistZip)&quot;" />
+  </Target>
+
 </Project>
