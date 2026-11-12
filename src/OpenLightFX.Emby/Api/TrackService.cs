@@ -1,5 +1,6 @@
 namespace OpenLightFX.Emby.Api;
 
+using System.Runtime.Serialization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediaBrowser.Controller.Library;
@@ -98,98 +99,130 @@ public class SessionStatusEntry
     public bool LightingEnabled { get; set; }
 }
 
+[DataContract]
 public class SettingsResponse
 {
+    [DataMember(Name = "bulbConfigJson")]
     [JsonPropertyName("bulbConfigJson")]
     public string BulbConfigJson { get; set; } = "[]";
 
+    [DataMember(Name = "mappingProfilesJson")]
     [JsonPropertyName("mappingProfilesJson")]
     public string MappingProfilesJson { get; set; } = "[]";
 
+    [DataMember(Name = "activeProfileName")]
     [JsonPropertyName("activeProfileName")]
     public string ActiveProfileName { get; set; } = "Default";
 
+    [DataMember(Name = "deviceProfileOverridesJson")]
     [JsonPropertyName("deviceProfileOverridesJson")]
     public string DeviceProfileOverridesJson { get; set; } = "{}";
 
+    [DataMember(Name = "globalTimeOffsetMs")]
     [JsonPropertyName("globalTimeOffsetMs")]
     public int GlobalTimeOffsetMs { get; set; }
 
+    [DataMember(Name = "globalBrightnessCap")]
     [JsonPropertyName("globalBrightnessCap")]
     public int GlobalBrightnessCap { get; set; } = 100;
 
+    [DataMember(Name = "lookaheadBufferMs")]
     [JsonPropertyName("lookaheadBufferMs")]
     public int LookaheadBufferMs { get; set; } = 2000;
 
+    [DataMember(Name = "pollIntervalMs")]
     [JsonPropertyName("pollIntervalMs")]
     public int PollIntervalMs { get; set; } = 500;
 
+    [DataMember(Name = "startBehaviorOverride")]
     [JsonPropertyName("startBehaviorOverride")]
     public string StartBehaviorOverride { get; set; } = "UseTrackDefault";
 
+    [DataMember(Name = "endBehaviorOverride")]
     [JsonPropertyName("endBehaviorOverride")]
     public string EndBehaviorOverride { get; set; } = "UseTrackDefault";
 
+    [DataMember(Name = "creditsBehaviorOverride")]
     [JsonPropertyName("creditsBehaviorOverride")]
     public string CreditsBehaviorOverride { get; set; } = "UseTrackDefault";
 
+    [DataMember(Name = "preShowEnabled")]
     [JsonPropertyName("preShowEnabled")]
     public bool PreShowEnabled { get; set; } = true;
 
+    [DataMember(Name = "photosensitivityMode")]
     [JsonPropertyName("photosensitivityMode")]
     public bool PhotosensitivityMode { get; set; }
 
+    [DataMember(Name = "showFlashingWarnings")]
     [JsonPropertyName("showFlashingWarnings")]
     public bool ShowFlashingWarnings { get; set; } = true;
 
+    [DataMember(Name = "additionalScanPaths")]
     [JsonPropertyName("additionalScanPaths")]
     public string AdditionalScanPaths { get; set; } = "";
 
+    [DataMember(Name = "pluginLogLevel")]
     [JsonPropertyName("pluginLogLevel")]
     public string PluginLogLevel { get; set; } = "Info";
 }
 
+[DataContract]
 public class TrackListResponse
 {
+    [DataMember(Name = "itemId")]
     [JsonPropertyName("itemId")]
     public string ItemId { get; set; } = string.Empty;
 
+    [DataMember(Name = "tracks")]
     [JsonPropertyName("tracks")]
     public List<TrackSummary> Tracks { get; set; } = new();
 
+    [DataMember(Name = "globalSelectedTrack")]
     [JsonPropertyName("globalSelectedTrack")]
     public string? GlobalSelectedTrack { get; set; }
 
+    [DataMember(Name = "deviceSelectedTrack")]
     [JsonPropertyName("deviceSelectedTrack")]
     public string? DeviceSelectedTrack { get; set; }
 }
 
+[DataContract]
 public class TrackSummary
 {
+    [DataMember(Name = "trackPath")]
     [JsonPropertyName("trackPath")]
     public string TrackPath { get; set; } = string.Empty;
 
+    [DataMember(Name = "title")]
     [JsonPropertyName("title")]
     public string Title { get; set; } = string.Empty;
 
+    [DataMember(Name = "durationMs")]
     [JsonPropertyName("durationMs")]
     public ulong DurationMs { get; set; }
 
+    [DataMember(Name = "channelCount")]
     [JsonPropertyName("channelCount")]
     public int ChannelCount { get; set; }
 
+    [DataMember(Name = "formatVersion")]
     [JsonPropertyName("formatVersion")]
     public string FormatVersion { get; set; } = "1.0";
 }
 
+[DataContract]
 public class SelectTrackResponse
 {
+    [DataMember(Name = "itemId")]
     [JsonPropertyName("itemId")]
     public string ItemId { get; set; } = string.Empty;
 
+    [DataMember(Name = "trackPath")]
     [JsonPropertyName("trackPath")]
     public string? TrackPath { get; set; }
 
+    [DataMember(Name = "deviceId")]
     [JsonPropertyName("deviceId")]
     public string? DeviceId { get; set; }
 }

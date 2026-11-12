@@ -1,5 +1,6 @@
 namespace OpenLightFX.Emby.Api;
 
+using System.Runtime.Serialization;
 using System.Text.Json.Serialization;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Entities;
@@ -57,6 +58,23 @@ public class PutStudioTrack : IRequiresRequestStream, IReturn<StudioTrackRespons
     public Stream? RequestStream { get; set; }
 }
 
+[Route("/OpenLightFX/Studio/Projects/{TrackId}", "GET", Description = "Read the Studio project sidecar")]
+[Authenticated]
+public class GetStudioProject
+{
+    public string TrackId { get; set; } = "";
+    public string? ItemId { get; set; }
+}
+
+[Route("/OpenLightFX/Studio/Projects/{TrackId}", "PUT", Description = "Store the Studio project sidecar")]
+[Authenticated(Roles = "Admin")]
+public class PutStudioProject : IRequiresRequestStream
+{
+    public string TrackId { get; set; } = "";
+    public string? ItemId { get; set; }
+    public Stream? RequestStream { get; set; }
+}
+
 [Route("/OpenLightFX/Studio/Preview/Start", "POST", Description = "Start a live bulb preview")]
 [Authenticated(Roles = "Admin")]
 public class StartStudioPreview : IReturn<StudioPreviewResponse>
@@ -79,91 +97,125 @@ public class StopStudioPreview : IReturn<StudioPreviewResponse>
 
 // ─── Responses ─────────────────────────────────────────────────────────
 
+[DataContract]
 public class StudioBulbResponse
 {
+    [DataMember(Name = "id")]
     [JsonPropertyName("id")]
     public string Id { get; set; } = "";
 
+    [DataMember(Name = "name")]
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
+    [DataMember(Name = "protocol")]
     [JsonPropertyName("protocol")]
     public string Protocol { get; set; } = "";
 
+    [DataMember(Name = "capabilities")]
     [JsonPropertyName("capabilities")]
     public StudioBulbCapabilitiesResponse Capabilities { get; set; } = new();
 }
 
+[DataContract]
 public class StudioBulbCapabilitiesResponse
 {
+    [DataMember(Name = "rgb")]
     [JsonPropertyName("rgb")]
     public bool Rgb { get; set; }
 
+    [DataMember(Name = "minTransitionMs")]
     [JsonPropertyName("minTransitionMs")]
     public int MinTransitionMs { get; set; }
 }
 
+[DataContract]
 public class StudioItemResponse
 {
+    [DataMember(Name = "itemId")]
     [JsonPropertyName("itemId")]
     public string ItemId { get; set; } = "";
 
+    [DataMember(Name = "name")]
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
+    [DataMember(Name = "year")]
     [JsonPropertyName("year")]
     public int Year { get; set; }
 
+    [DataMember(Name = "runtimeMs")]
     [JsonPropertyName("runtimeMs")]
     public long RuntimeMs { get; set; }
 }
 
+[DataContract]
 public class StudioStreamUrlResponse
 {
+    [DataMember(Name = "url")]
     [JsonPropertyName("url")]
     public string Url { get; set; } = "";
 }
 
+[DataContract]
 public class StudioTrackResponse
 {
+    [DataMember(Name = "trackId")]
     [JsonPropertyName("trackId")]
     public string TrackId { get; set; } = "";
 
+    [DataMember(Name = "title")]
     [JsonPropertyName("title")]
     public string Title { get; set; } = "";
 
+    [DataMember(Name = "itemId")]
     [JsonPropertyName("itemId")]
     public string ItemId { get; set; } = "";
 
+    [DataMember(Name = "updatedAt")]
     [JsonPropertyName("updatedAt")]
     public string UpdatedAt { get; set; } = "";
 }
 
+[DataContract]
 public class StudioPreviewStateDto
 {
+    [DataMember(Name = "bulbId")]
     [JsonPropertyName("bulbId")]
     public string BulbId { get; set; } = "";
 
+    [DataMember(Name = "r")]
     [JsonPropertyName("r")]
     public int R { get; set; }
 
+    [DataMember(Name = "g")]
     [JsonPropertyName("g")]
     public int G { get; set; }
 
+    [DataMember(Name = "b")]
     [JsonPropertyName("b")]
     public int B { get; set; }
 
+    [DataMember(Name = "brightness")]
     [JsonPropertyName("brightness")]
     public int Brightness { get; set; }
 
+    [DataMember(Name = "transitionMs")]
     [JsonPropertyName("transitionMs")]
     public int TransitionMs { get; set; }
 }
 
+[DataContract]
 public class StudioPreviewResponse
 {
+    [DataMember(Name = "status")]
     [JsonPropertyName("status")]
     public string Status { get; set; } = "";
+
+    /// <summary>False after an idle restore so the next frame is told preview is not active.</summary>
+    [DataMember(Name = "active")]
+    [JsonPropertyName("active")]
+    public bool Active { get; set; } = true;
 }
 
 // ─── Service ───────────────────────────────────────────────────────────
@@ -317,6 +369,14 @@ public class StudioService : IService, IRequiresRequest
         var bytes = await ReadBodyAsync(request.RequestStream).ConfigureAwait(false);
         var info = StudioTrackFiles.ParseForSave(_parser, bytes, request.TrackId);
         var path = StudioTrackFiles.GetSavePath(item.Path, request.TrackId);
+        try
+        {
+            StudioTrackFiles.EnsureNoConflict(path, request.TrackId, Request?.Headers?["If-Match"]);
+        }
+        catch (TrackSaveConflictException ex)
+        {
+            throw new ConflictException(ex.Message);
+        }
 
         try
         {
@@ -330,7 +390,7 @@ public class StudioService : IService, IRequiresRequest
 
         ServerEntryPoint.Instance?.TrackDiscoveryService.InvalidateCache(item.Path);
         var itemId = PublicItemId(item);
-        var updated = new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero);
+        var updated = StudioTrackFiles.UpdatedAtToken(path);
         IndexOrNull()?.Remember(request.TrackId, itemId, path);
 
         _logger.Info("Saved Studio track '{0}' for item {1} at '{2}'", request.TrackId, itemId, path);
@@ -339,9 +399,65 @@ public class StudioService : IService, IRequiresRequest
             TrackId = request.TrackId,
             Title = info.Title,
             ItemId = itemId,
-            UpdatedAt = updated.UtcDateTime.ToString("o")
+            UpdatedAt = updated
         };
     }
+
+    public object Get(GetStudioProject request)
+    {
+        if (string.IsNullOrWhiteSpace(request.ItemId))
+            throw new ArgumentException("itemId is required");
+        if (!StudioTrackFiles.IsSafeTrackId(request.TrackId))
+            throw new ArgumentException("trackId contains unsupported characters");
+
+        var item = RequireItem(request.ItemId);
+        if (string.IsNullOrEmpty(item.Path))
+            throw new ResourceNotFoundException("Item has no file path");
+
+        var path = StudioSidecar.GetPath(item.Path, request.TrackId);
+        if (!File.Exists(path))
+            throw new ResourceNotFoundException("Project sidecar not found");
+
+        var bytes = File.ReadAllBytes(path);
+        return JsonResult(bytes);
+    }
+
+    public async Task<object> Put(PutStudioProject request)
+    {
+        if (string.IsNullOrWhiteSpace(request.ItemId))
+            throw new ArgumentException("itemId is required");
+        if (!StudioTrackFiles.IsSafeTrackId(request.TrackId))
+            throw new ArgumentException("trackId contains unsupported characters");
+
+        var item = RequireItem(request.ItemId);
+        if (string.IsNullOrEmpty(item.Path))
+            throw new ArgumentException("Item has no file path to store a project sidecar beside");
+
+        var raw = await ReadLimitedAsync(request.RequestStream, StudioSidecar.MaxBytes, "Project body exceeds 4 MB")
+            .ConfigureAwait(false);
+        var bytes = StudioSidecar.Normalize(raw);
+        var path = StudioSidecar.GetPath(item.Path, request.TrackId);
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, bytes).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new ArgumentException($"Could not save project: {ex.Message}");
+        }
+
+        _logger.Info("Saved Studio sidecar '{0}' for item {1}", request.TrackId, PublicItemId(item));
+        return JsonResult(bytes);
+    }
+
+    private object JsonResult(byte[] json) =>
+        _results.GetResult(
+            Request,
+            new ReadOnlyMemory<byte>(json),
+            "application/json; charset=utf-8",
+            new Dictionary<string, string> { ["Cache-Control"] = "no-cache" });
 
     public async Task<object> Post(StartStudioPreview request)
     {
@@ -486,10 +602,13 @@ public class StudioService : IService, IRequiresRequest
         return null;
     }
 
-    private static async Task<byte[]> ReadBodyAsync(Stream? stream)
+    private static Task<byte[]> ReadBodyAsync(Stream? stream) =>
+        ReadLimitedAsync(stream, StudioTrackFiles.MaxTrackBytes, "V-001: Track body exceeds 32 MB");
+
+    private static async Task<byte[]> ReadLimitedAsync(Stream? stream, int maxBytes, string tooLarge)
     {
         if (stream == null)
-            throw new ArgumentException("Track body is empty");
+            throw new ArgumentException("V-001: Track body is empty");
 
         using var buffer = new MemoryStream();
         var chunk = new byte[81920];
@@ -498,8 +617,8 @@ public class StudioService : IService, IRequiresRequest
             var read = await stream.ReadAsync(chunk).ConfigureAwait(false);
             if (read == 0)
                 break;
-            if (buffer.Length + read > StudioTrackFiles.MaxTrackBytes)
-                throw new ArgumentException("Track body exceeds 32 MB");
+            if (buffer.Length + read > maxBytes)
+                throw new ArgumentException(tooLarge);
             buffer.Write(chunk, 0, read);
         }
 

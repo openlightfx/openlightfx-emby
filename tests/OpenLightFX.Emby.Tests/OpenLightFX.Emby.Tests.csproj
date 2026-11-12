@@ -39,5 +39,8 @@
     <Reference Include="Emby.Web.GenericEdit">
       <HintPath>..\..\lib\Emby.Web.GenericEdit.dll</HintPath>
     </Reference>
+    <Reference Include="ServiceStack.Text">
+      <HintPath>..\..\lib\ServiceStack.Text.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>
