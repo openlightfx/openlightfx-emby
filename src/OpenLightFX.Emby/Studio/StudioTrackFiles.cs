@@ -91,21 +91,18 @@ public static class StudioTrackFiles
     /// <summary>
     /// Replacing an existing track requires <paramref name="ifMatch"/> to equal the
     /// updatedAt token the track list returns. A missing or different token is a conflict.
-    /// Creating a file that does not exist yet is not a conflict, except for track id
-    /// <c>conflict</c>: the fullstack probe PUTs a valid body there with no prior version
-    /// and expects the server conflict text instead of a create.
+    /// Creating a file that does not exist yet is not a conflict.
     /// </summary>
-    public static void EnsureNoConflict(string path, string trackId, string? ifMatch)
+    public static void EnsureNoConflict(string path, string? ifMatch)
     {
+        if (!File.Exists(path))
+            return;
+
+        var token = UpdatedAtToken(path);
         var presented = ifMatch?.Trim().Trim('"');
-        var exists = File.Exists(path);
-        if (exists && string.Equals(presented, UpdatedAtToken(path), StringComparison.Ordinal))
+        if (string.Equals(presented, token, StringComparison.Ordinal))
             return;
 
-        if (!exists && !trackId.Equals("conflict", StringComparison.OrdinalIgnoreCase))
-            return;
-
-        var token = exists ? UpdatedAtToken(path) : "none";
         throw new TrackSaveConflictException(
             $"conflict: the server track was updated at {token}. Send If-Match with that updatedAt.");
     }

@@ -578,7 +578,7 @@ public class StudioService : IService, IRequiresRequest
         var path = StudioTrackFiles.GetSavePath(item.Path, request.TrackId);
         try
         {
-            StudioTrackFiles.EnsureNoConflict(path, request.TrackId, Request?.Headers?["If-Match"]);
+            StudioTrackFiles.EnsureNoConflict(path, Request?.Headers?["If-Match"]);
         }
         catch (TrackSaveConflictException ex)
         {
@@ -748,21 +748,9 @@ public class StudioService : IService, IRequiresRequest
         }
 
         if (Guid.TryParse(itemId, out var guid))
-        {
-            var byGuid = _library.GetItemById(guid);
-            if (byGuid != null)
-                return byGuid;
-        }
+            return _library.GetItemById(guid);
 
-        var named = _library.GetItemList(new InternalItemsQuery
-        {
-            IncludeItemTypes = new[] { "Movie" },
-            Recursive = true,
-            SearchTerm = itemId,
-            Limit = 50
-        });
-        return named.FirstOrDefault(item => string.Equals(item.Name, itemId, StringComparison.OrdinalIgnoreCase))
-            ?? named.FirstOrDefault(item => item.Name?.Contains(itemId, StringComparison.OrdinalIgnoreCase) == true);
+        return null;
     }
 
     private async Task<StudioSourceInfo> ProbeAsync(BaseItem item)
