@@ -263,6 +263,9 @@ public class StudioProxyStatusResponse
 
     [DataMember(Name = "editUrl")]
     public string? EditUrl { get; set; }
+
+    [DataMember(Name = "reason")]
+    public string? Reason { get; set; }
 }
 
 [DataContract]
@@ -419,17 +422,11 @@ public class StudioService : IService, IRequiresRequest
     {
         var item = RequireItem(request.ItemId);
         var source = await ProbeAsync(item).ConfigureAwait(false);
+        var itemId = PublicItemId(item);
+        if (StudioProxyCache.TryGet(itemId, out var existing) && existing.State == "failed")
+            StudioProxyCache.Forget(itemId);
         var job = EnsureProxy(item, source);
-        return new StudioProxyStatusResponse
-        {
-            State = job.State,
-            EncodedThroughMs = job.EncodedThroughMs,
-            Fps = job.Fps,
-            KeyframeIntervalMs = job.KeyframeIntervalMs,
-            Width = job.Width,
-            Height = job.Height,
-            EditUrl = EditUrl(PublicItemId(item))
-        };
+        return ToProxy(job, EditUrl(itemId));
     }
 
     public async Task<object> Get(GetStudioFrame request)
@@ -472,11 +469,22 @@ public class StudioService : IService, IRequiresRequest
         var item = RequireItem(request.ItemId);
         var source = await ProbeAsync(item).ConfigureAwait(false);
         var job = EnsureProxy(item, source);
+        if (job.State == "failed")
+            return FailedProxy(job);
+
         var range = Request?.Headers?["Range"];
+        // An open-ended read of a file that is still growing must stay open. A closed
+        // 206 whose total is the current length makes the video element treat that
+        // byte as EOF and error on the truncated fragment.
+        if (job.State is "building" or "missing" && StudioProxyReadPlan.IsOpenEnded(range))
+            return GrowingProxy(job, StudioProxyReadPlan.RangeStart(range));
+
         var length = await WaitForRangeAsync(job, range).ConfigureAwait(false);
         var slice = StudioByteRange.Resolve(range, length);
         if (slice.Status == 416)
         {
+            if (job.State is "building" or "missing")
+                return GrowingProxy(job, slice.Start);
             var text = Encoding.UTF8.GetBytes($"edit copy has reached {job.EncodedThroughMs} ms");
             var denied = _results.GetResult(Request, new ReadOnlyMemory<byte>(text), "text/plain", new Dictionary<string, string>
             {
@@ -513,6 +521,29 @@ public class StudioService : IService, IRequiresRequest
 
         var result = _results.GetResult(Request, new ReadOnlyMemory<byte>(bytes), "video/mp4", headers);
         return slice.Status == 206 ? WithStatus(result, HttpStatusCode.PartialContent) : result;
+    }
+
+    private object GrowingProxy(StudioProxyJob job, long start)
+    {
+        var headers = new Dictionary<string, string>
+        {
+            ["Cache-Control"] = "no-store",
+            ["Accept-Ranges"] = "none"
+        };
+        if (start > 0)
+            headers["Content-Range"] = $"bytes {start}-*/*";
+        var result = _results.GetResult(Request, new StudioGrowingStream(job, start), "video/mp4", headers);
+        return start > 0 ? WithStatus(result, HttpStatusCode.PartialContent) : result;
+    }
+
+    private object FailedProxy(StudioProxyJob job)
+    {
+        var text = Encoding.UTF8.GetBytes(string.IsNullOrWhiteSpace(job.Reason) ? "edit proxy failed" : job.Reason);
+        var result = _results.GetResult(Request, new ReadOnlyMemory<byte>(text), "text/plain", new Dictionary<string, string>
+        {
+            ["Cache-Control"] = "no-store"
+        });
+        return WithStatus(result, HttpStatusCode.InternalServerError);
     }
 
     /// <summary>
@@ -819,7 +850,7 @@ public class StudioService : IService, IRequiresRequest
 
             if (string.IsNullOrEmpty(item.Path))
             {
-                job.MarkFailed();
+                job.MarkFailed("Item has no media file");
                 return job;
             }
 
@@ -830,7 +861,7 @@ public class StudioService : IService, IRequiresRequest
             catch (Exception ex)
             {
                 _logger.ErrorException("Edit proxy failed to start for {0}", ex, itemId);
-                job.MarkFailed();
+                job.MarkFailed("ffmpeg failed to start");
             }
             return job;
         });
@@ -845,16 +876,19 @@ public class StudioService : IService, IRequiresRequest
         Hdr = source.Hdr,
         ColorTransfer = source.ColorTransfer,
         AudioCodec = source.AudioCodec,
-        Proxy = new StudioProxyStatusResponse
-        {
-            State = job.State == "failed" ? "building" : job.State,
-            EncodedThroughMs = job.EncodedThroughMs,
-            Fps = job.Fps,
-            KeyframeIntervalMs = job.KeyframeIntervalMs,
-            Width = job.Width,
-            Height = job.Height,
-            EditUrl = EditUrl(PublicItemId(item))
-        }
+        Proxy = ToProxy(job, EditUrl(PublicItemId(item)))
+    };
+
+    private static StudioProxyStatusResponse ToProxy(StudioProxyJob job, string? editUrl) => new()
+    {
+        State = job.State,
+        EncodedThroughMs = job.EncodedThroughMs,
+        Fps = job.Fps,
+        KeyframeIntervalMs = job.KeyframeIntervalMs,
+        Width = job.Width,
+        Height = job.Height,
+        EditUrl = job.State == "failed" ? null : editUrl,
+        Reason = job.State == "failed" ? job.Reason : null
     };
 
     private string EditUrl(string itemId) =>

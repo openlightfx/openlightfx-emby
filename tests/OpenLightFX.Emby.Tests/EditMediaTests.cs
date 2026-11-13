@@ -120,6 +120,7 @@ public class EditMediaTests
         Assert.Contains("open-gop=0", args);
         Assert.Contains("+cgop", args);
         Assert.Contains("frag_keyframe+empty_moov", args);
+        Assert.DoesNotContain("-re", args, StringComparison.Ordinal);
         Assert.DoesNotContain("Transcode", args, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -148,5 +149,59 @@ public class EditMediaTests
 
         Assert.Equal(1500, StudioFfmpegProgress.TryReadEncodedMs("out_time_ms=1500000", out var ms) ? ms : -1);
         Assert.Equal(1500, StudioFfmpegProgress.TryReadEncodedMs("out_time=00:00:01.500000", out var clock) ? clock : -1);
+    }
+
+    [Fact(DisplayName = "MEDIA-016 @fixture an open-ended read follows a growing proxy and a closed range does not")]
+    public void Open_ended_reads_follow_the_growing_file()
+    {
+        Assert.True(StudioProxyReadPlan.IsOpenEnded(null));
+        Assert.True(StudioProxyReadPlan.IsOpenEnded("bytes=0-"));
+        Assert.False(StudioProxyReadPlan.IsOpenEnded("bytes=0-100"));
+        Assert.Equal(0, StudioProxyReadPlan.RangeStart("bytes=0-"));
+        Assert.Equal(9000, StudioProxyReadPlan.RangeStart("bytes=9000-"));
+        Assert.Equal("edit proxy failed", StudioProxyReadPlan.PublicReason(null));
+        Assert.DoesNotContain("api_key", StudioProxyReadPlan.PublicReason("ffmpeg exited and api_key=secret"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact(DisplayName = "ERR-001 @fixture a failed proxy keeps a reason and can be forgotten")]
+    public void Failed_proxy_keeps_a_reason()
+    {
+        var job = new StudioProxyJob("item", Path.Combine(Path.GetTempPath(), "missing.mp4"), 24, 320, 240);
+        job.MarkFailed("ffmpeg exited with code 1");
+        Assert.Equal("failed", job.State);
+        Assert.Equal("ffmpeg exited with code 1", job.Reason);
+        job.MarkFailed("saw api_key=abc");
+        Assert.DoesNotContain("api_key", job.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact(DisplayName = "MEDIA-003 @fixture a growing proxy stream stays open until the encode finishes")]
+    public async Task Growing_stream_reads_bytes_appended_during_the_build()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "olfx-grow-" + Guid.NewGuid().ToString("N"));
+        var job = new StudioProxyJob("grow", path, 24, 320, 240);
+        await File.WriteAllBytesAsync(path, new byte[] { 1, 2, 3, 4 });
+        await using var stream = new StudioGrowingStream(job, 0);
+        Assert.False(stream.CanSeek);
+        var buffer = new byte[8];
+        var first = await stream.ReadAsync(buffer.AsMemory(0, 8));
+        Assert.Equal(4, first);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, buffer[..4]);
+
+        var waiting = stream.ReadAsync(buffer.AsMemory(0, 8)).AsTask();
+        await Task.Delay(80);
+        Assert.False(waiting.IsCompleted);
+
+        await using (var writer = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+        {
+            await writer.WriteAsync(new byte[] { 5, 6, 7, 8 });
+            await writer.FlushAsync();
+        }
+
+        var second = await waiting;
+        Assert.Equal(4, second);
+        Assert.Equal(new byte[] { 5, 6, 7, 8 }, buffer[..4]);
+        job.MarkReady(8000);
+        Assert.Equal(0, await stream.ReadAsync(buffer));
+        File.Delete(path);
     }
 }

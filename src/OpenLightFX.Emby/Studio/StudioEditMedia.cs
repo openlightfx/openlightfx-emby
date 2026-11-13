@@ -113,9 +113,13 @@ public static class StudioProxyPlan
         var scale =
             "scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease," +
             "scale=trunc(iw/2)*2:trunc(ih/2)*2";
-        return new[]
+        // The harness sets OLFX_STUDIO_PROXY_READRATE so a long synthetic clip is still
+        // encoding when playback starts. Production encodes as fast as ffmpeg can.
+        var args = new List<string> { "-y" };
+        if (RealtimeRead())
+            args.Add("-re");
+        args.AddRange(new[]
         {
-            "-y",
             "-i", inputPath,
             "-vf", scale,
             "-c:v", "libx264",
@@ -136,7 +140,16 @@ public static class StudioProxyPlan
             "-progress", "pipe:2",
             "-nostats",
             outputPath
-        };
+        });
+        return args;
+    }
+
+    public static bool RealtimeRead()
+    {
+        var value = Environment.GetEnvironmentVariable("OLFX_STUDIO_PROXY_READRATE");
+        return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
     }
 
     private static int IntervalMs(double fps, int gop) =>
@@ -285,6 +298,40 @@ public static class StudioByteRange
         if (end >= length)
             end = length - 1;
         return new StudioByteSlice(start, end, 206);
+    }
+}
+
+public static class StudioProxyReadPlan
+{
+    public static bool IsOpenEnded(string? rangeHeader)
+    {
+        if (string.IsNullOrWhiteSpace(rangeHeader))
+            return true;
+        if (!rangeHeader.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase))
+            return true;
+        var spec = rangeHeader["bytes=".Length..].Split(',')[0].Trim();
+        var dash = spec.IndexOf('-');
+        return dash >= 0 && spec[(dash + 1)..].Trim().Length == 0;
+    }
+
+    public static long RangeStart(string? rangeHeader)
+    {
+        if (string.IsNullOrWhiteSpace(rangeHeader) || !rangeHeader.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase))
+            return 0;
+        var spec = rangeHeader["bytes=".Length..].Split(',')[0].Trim();
+        var dash = spec.IndexOf('-');
+        if (dash <= 0)
+            return 0;
+        return long.TryParse(spec[..dash], NumberStyles.Integer, CultureInfo.InvariantCulture, out var start) && start > 0
+            ? start
+            : 0;
+    }
+
+    public static string PublicReason(string? reason)
+    {
+        var text = string.IsNullOrWhiteSpace(reason) ? "edit proxy failed" : reason.Trim();
+        text = text.Replace("api_key", "token", StringComparison.OrdinalIgnoreCase);
+        return text.Length > 240 ? text[..240] : text;
     }
 }
 
