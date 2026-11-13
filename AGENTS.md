@@ -24,7 +24,7 @@ J1 — First light (spec in the Studio repo):
 
 | Step                 | Plugin work                                                                                                                    |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 1. Set up a room     | Rooms CRUD, Emby device list (screens), discovery with stable bulb ids, Identify by id, Hue pairing, one-time legacy import.   |
+| 1. Set up a room     | Rooms CRUD, Emby device list (screens), discovery with stable bulb ids, Identify by id, and Hue pairing. No legacy import.   |
 | 2. Pick a movie      | `GET /OpenLightFX/Studio/Items` (movies only) with poster URLs, track count, active flag.                                      |
 | 3. Open/create track | List, read, validate, and save `.lightfx` files; project sidecar.                                                              |
 | 4. Edit              | Edit-proxy video and MediaInfo, tone-mapped Frame, live preview through a room using the same routing as playback.              |
@@ -45,7 +45,7 @@ Design for steps 1, 4 (preview), and 5: [`docs/design/rooms-api.md`](docs/design
 
 Routing joins them: **fold-down** when a room has no bulb for a channel's position (SL→L, SR→R, C→L and R, anything→Ambient bulbs→every bulb), **fill** when a bulb's position has no channel (C←L+R mix, SL←L, SR←R, Ambient←mix of all), **mixing** when a bulb gets several channels (max brightness, brightness-weighted color), and a per-bulb **Follows** override. The exact tables are in the Studio J1 spec and the shared fixture `tests/fixtures/routing/cases.json`. Routing has **one implementation** (`RoomRouter`, proposed) used by playback and by preview. Studio never re-implements it.
 
-Mapping profiles (`MappingProfilesJson`, `ActiveProfileName`, `DeviceProfileOverridesJson`) and the pasted `BulbConfigJson` are **legacy**: read only for the one-time import and, until rooms exist, for playback so existing installs keep working.
+Pasted bulb JSON, mapping profiles, active profile names, and device-profile overrides are removed. Playback uses a room selected by the Emby device; no legacy settings fallback or import exists.
 
 ## 5. Architecture
 
@@ -53,9 +53,8 @@ Mapping profiles (`MappingProfilesJson`, `ActiveProfileName`, `DeviceProfileOver
 Emby playback events (ISessionManager)
   → ServerEntryPoint.TryStartLightingSession(session, item, deviceId)
       → TrackDiscoveryService (sidecar / lightfx/ subfolder / IMDb in scan paths)
-      → TrackSelectionService (active track per item; device scope is legacy)
-      → [today]   MappingProfile from options + device override
-        [J1]      RoomStore: deviceId → room → bulbs; RoomRouter → routing
+      → TrackSelectionService (active track per item, optionally scoped to device)
+      → RoomStore: deviceId → room → bulbs; transient position routing → playback
       → PlaybackSession (state machine, keyframes, effects lookahead, seek detection)
           → InterpolationEngine, EffectRendererFactory, PhotosensitivityFilter
           → ChannelManager (bulb ← channel state, brightness cap)
@@ -64,7 +63,7 @@ Emby playback events (ISessionManager)
 Studio (static SPA, embedded zip) ← StudioAssetService at /emby/OpenLightFX/studio/
 Studio API ← StudioService at /OpenLightFX/Studio/*
   Items, MediaInfo, Proxy (+ Proxy/Media), Frame, Tracks, Projects, Preview/Start|Frame|Stop
-  [J1] Setup, Rooms, Devices, Discover, Bulbs, Identify, Hue/Pair, Import/Legacy, Routing, ActiveTrack
+  [J1] Setup, Rooms, Devices, Discover, Bulbs, Identify, Hue/Pair, Routing, ActiveTrack
 ```
 
 Key facts:
@@ -88,10 +87,10 @@ Key facts:
 | `src/OpenLightFX.Emby/Effects/`       | 13 effect renderers and the photosensitivity filter.                                     |
 | `src/OpenLightFX.Emby/Drivers/`       | `IBulbDriver` per protocol, `BulbDriverFactory`, Hue pairing.                             |
 | `src/OpenLightFX.Emby/Discovery/`     | Per-protocol discovery, coordinator, in-memory store, identify.                         |
-| `src/OpenLightFX.Emby/Configuration/` | `PluginOptions` (Emby generic settings editor) and JSON parsing of legacy fields.        |
+| `src/OpenLightFX.Emby/Configuration/` | `PluginOptions` (Emby generic settings editor) and playback setting parsing.                 |
 | `src/OpenLightFX.Emby/Services/`      | Track discovery, parsing/validation, selection.                                          |
-| `src/OpenLightFX.Emby/Models/`        | Bulb configs (polymorphic on `protocol`), legacy `MappingProfile`, track info.          |
-| `src/OpenLightFX.Emby/Rooms/`         | (Proposed) `RoomStore`, `RoomRouter`, `BulbMixer`, `LegacyImporter`, `TrackLayout`.     |
+| `src/OpenLightFX.Emby/Models/`        | Bulb configs (polymorphic on `protocol`), transient channel mapping, track info.          |
+| `src/OpenLightFX.Emby/Rooms/`         | Room storage, stable bulb ids, and position-based playback mapping.                        |
 | `tests/OpenLightFX.Emby.Tests/`       | xUnit. `Fixtures/sampling` is a byte-for-byte copy of Studio's shared fixtures (`SOURCE` names the commit). |
 | `docs/design/`                        | Design docs. `rooms-api.md` is the J1 plugin design.                                     |
 | `scripts/fetch-sdk.sh`                | Puts Emby 4.9.3.0 SDK DLLs in `lib/` (from the Docker image, else the official .deb).    |
@@ -122,11 +121,11 @@ It boots Emby 4.9.3.0 in Docker on `localhost:8096` (`docker-compose.fullstack.y
 ## 8. Definition of done
 
 1. The behavior is in an approved spec (Studio `docs/journeys/…` or `docs/requirements/studio-requirements.md`) or design doc here, and the PR names the requirement IDs.
-2. `dotnet test -c Release` passes. Pure logic (routing, mixing, import, ids, validation) has unit tests over the shared fixtures, copied byte-for-byte from the Studio repo.
+2. `dotnet test -c Release` passes. Pure logic (routing, mixing, ids, validation) has unit tests over shared fixtures, copied byte-for-byte from the Studio repo.
 3. The full stack passes with this branch (`OLFX_EMBY_BRANCH`), in Chromium and Firefox, against real Emby and the simulator. For anything the user sees, the Studio walkthrough video for that step has been recorded and watched.
 4. No test is skipped, loosened, or listed as an expected failure to hide a real bug. No "works on mocks only".
 5. Responses never contain secrets (Emby tokens, Hue bridge keys). Errors return `{ error, message }` with the human message Studio will show.
-6. Backward compatibility: existing installs (pasted config, existing tracks without a layout, existing track selections) keep working until the owner says otherwise.
+6. Pasted bulb JSON, mapping profiles, and per-device profile overrides are unsupported. Existing `.lightfx` tracks and track selections remain supported.
 
 "All tests pass" is necessary, not sufficient.
 

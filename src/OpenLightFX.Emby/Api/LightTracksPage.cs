@@ -54,12 +54,10 @@ public class LightTracksPage : IPluginConfigurationPage
         var options = OpenLightFX.Emby.Plugin.Instance?.GetPluginOptions();
         if (options != null)
         {
-            var configService = new Configuration.ConfigurationService();
-            var bulbCount = configService.ParseBulbConfig(options.BulbConfigJson).Count;
-            var profileCount = configService.ParseMappingProfiles(options.MappingProfilesJson).Count;
-            sb.AppendLine($" &nbsp;|&nbsp; <strong>Configured Bulbs:</strong> {bulbCount}");
-            sb.AppendLine($" &nbsp;|&nbsp; <strong>Mapping Profiles:</strong> {profileCount}");
-            sb.AppendLine($" &nbsp;|&nbsp; <strong>Active Profile:</strong> {options.ActiveProfileName}");
+            var roomCount = OpenLightFX.Emby.ServerEntryPoint.Instance?.RoomStore.Rooms.Count ?? 0;
+            var bulbCount = OpenLightFX.Emby.ServerEntryPoint.Instance?.RoomStore.Bulbs.Count ?? 0;
+            sb.AppendLine($" &nbsp;|&nbsp; <strong>Rooms:</strong> {roomCount}");
+            sb.AppendLine($" &nbsp;|&nbsp; <strong>Known Bulbs:</strong> {bulbCount}");
             sb.AppendLine($" &nbsp;|&nbsp; <strong>Photosensitivity:</strong> {(options.PhotosensitivityMode ? "ON" : "OFF")}");
         }
         sb.AppendLine("</div>");
@@ -79,9 +77,8 @@ public class LightTracksPage : IPluginConfigurationPage
         sb.AppendLine("Place <code>.lightfx</code> files next to your movie files (sidecar), ");
         sb.AppendLine("in a <code>lightfx/</code> subfolder, or configure additional scan paths in plugin settings.</p>");
 
-        sb.AppendLine("<p class=\"note\">Track selection and bulb configuration is managed via the ");
-        sb.AppendLine("<a href=\"https://openlightfx.com/config\" style=\"color: #52b54b;\">OpenLightFX Setup Wizard</a> ");
-        sb.AppendLine("or the REST API at <code>/OpenLightFX/Tracks/ByItem?itemId=</code>.</p>");
+        sb.AppendLine("<p class=\"note\">Room and bulb setup is managed in OpenLightFX Studio. ");
+        sb.AppendLine("Track selection is available through the REST API at <code>/OpenLightFX/Tracks/ByItem?itemId=</code>.</p>");
 
         // REST API reference
         sb.AppendLine("<h2>REST API</h2>");

@@ -152,6 +152,25 @@ public class StudioBulbResponse
     [DataMember(Name = "capabilities")]
     [JsonPropertyName("capabilities")]
     public StudioBulbCapabilitiesResponse Capabilities { get; set; } = new();
+
+    [DataMember(Name = "ipAddress")]
+    [JsonPropertyName("ipAddress")]
+    public string? IpAddress { get; set; }
+    [DataMember(Name = "model")]
+    [JsonPropertyName("model")]
+    public string? Model { get; set; }
+    [DataMember(Name = "roomId")]
+    [JsonPropertyName("roomId")]
+    public string? RoomId { get; set; }
+    [DataMember(Name = "position")]
+    [JsonPropertyName("position")]
+    public string? Position { get; set; }
+    [DataMember(Name = "follows")]
+    [JsonPropertyName("follows")]
+    public string? Follows { get; set; }
+    [DataMember(Name = "lastSeenAt")]
+    [JsonPropertyName("lastSeenAt")]
+    public string? LastSeenAt { get; set; }
 }
 
 [DataContract]
@@ -359,6 +378,14 @@ public class StudioService : IService, IRequiresRequest
 
     public async Task<object> Get(GetStudioBulbs request)
     {
+        var known = ServerEntryPoint.Instance?.RoomStore.Bulbs;
+        if (known is { Count: > 0 })
+            return known.Select(b => new StudioBulbResponse
+            {
+                Id = b.Id, Name = b.Name, Protocol = b.Config.Protocol.ToString().ToLowerInvariant(),
+                IpAddress = b.Config.IpAddress?.ToString(), Model = b.Config.Model, RoomId = b.RoomId,
+                Position = b.Position, Follows = b.Follows, LastSeenAt = b.LastSeenAt
+            }).ToList();
         var bulbs = LoadBulbs();
         var response = new List<StudioBulbResponse>(bulbs.Count);
         foreach (var bulb in bulbs)
@@ -774,7 +801,6 @@ public class StudioService : IService, IRequiresRequest
         if (!started)
             throw new ConflictException("playback_active");
 
-        RememberMapping(mapping);
         _logger.Info("Studio preview started");
         return new StudioPreviewResponse { Status = "started", Active = true };
     }
@@ -1029,31 +1055,11 @@ public class StudioService : IService, IRequiresRequest
     private static string PublicItemId(BaseItem item) =>
         item.InternalId > 0 ? item.InternalId.ToString() : item.Id.ToString("N");
 
-    private List<Models.BulbConfig> LoadBulbs()
-    {
-        var options = Plugin.Instance?.GetPluginOptions();
-        if (options == null)
-            return new List<Models.BulbConfig>();
-        return _config.ParseBulbConfig(options.BulbConfigJson);
-    }
+    private List<Models.BulbConfig> LoadBulbs() =>
+        ServerEntryPoint.Instance?.RoomStore.Bulbs.Select(bulb => bulb.Config).ToList() ?? new List<Models.BulbConfig>();
 
     private bool PhotosensitivityEnabled() =>
         Plugin.Instance?.GetPluginOptions().PhotosensitivityMode == true;
-
-    private static void RememberMapping(IReadOnlyDictionary<string, IReadOnlyList<string>> mapping)
-    {
-        var plugin = Plugin.Instance;
-        if (plugin == null || mapping.Count == 0)
-            return;
-
-        plugin.UpdateOptions(options =>
-        {
-            options.MappingProfilesJson = StudioMappingProfiles.WithChannels(
-                options.MappingProfilesJson,
-                options.ActiveProfileName,
-                mapping);
-        });
-    }
 
     private List<StudioListedTrack> Discover(BaseItem item)
     {

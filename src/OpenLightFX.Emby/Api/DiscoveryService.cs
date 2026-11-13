@@ -54,16 +54,6 @@ public class GetHueLightsRequest : IReturn<HueLightsResponse>
     public string Username { get; set; } = "";
 }
 
-[Route("/OpenLightFX/Discover/SaveConfig", "POST", Description = "Bulk-replace bulb config and mapping profiles from onboarding wizard")]
-public class SaveDiscoveredBulbConfigRequest : IReturn<SaveDiscoveredBulbConfigResponse>
-{
-    /// <summary>Full replacement list of bulbs as a raw JSON array string.</summary>
-    public string? BulbsJson { get; set; }
-
-    /// <summary>Full replacement list of mapping profiles to store in MappingProfilesJson.</summary>
-    public List<MappingProfile>? MappingProfiles { get; set; }
-}
-
 // ─── Response DTOs ───────────────────────────────────────────────────
 
 public class DiscoverResponse
@@ -177,18 +167,6 @@ public class HueLightsResponse
     public string? Error { get; set; }
 }
 
-public class SaveDiscoveredBulbConfigResponse
-{
-    [JsonPropertyName("success")]
-    public bool Success { get; set; }
-
-    [JsonPropertyName("configuredBulbCount")]
-    public int ConfiguredBulbCount { get; set; }
-
-    [JsonPropertyName("error")]
-    public string? Error { get; set; }
-}
-
 // ─── Hue pairing state ──────────────────────────────────────────────
 
 internal class HuePairingState
@@ -205,12 +183,6 @@ public class DiscoveryService : IService
 {
     private static readonly ConcurrentDictionary<string, HuePairingState> HuePairingStates = new();
     private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
 
     // ── POST /OpenLightFX/Discover ───────────────────────────────────
 
@@ -229,10 +201,8 @@ public class DiscoveryService : IService
             entry.DiscoveredBulbStore.Clear();
             entry.DiscoveredBulbStore.AddRange(discovered);
 
-            var options = entry.GetOptions();
-            var configuredBulbs = entry.ConfigService.ParseBulbConfig(options.BulbConfigJson);
             var configuredIps = new HashSet<IPAddress>(
-                configuredBulbs.Select(b => b.IpAddress));
+                entry.RoomStore.Bulbs.Select(bulb => bulb.Config.IpAddress));
 
             var dtos = discovered.Select(b => new DiscoveredBulbDto
             {
@@ -432,47 +402,6 @@ public class DiscoveryService : IService
         catch (Exception ex)
         {
             return new HueLightsResponse { Error = ex.Message };
-        }
-    }
-
-    // ── POST /OpenLightFX/Discover/SaveConfig ────────────────────────
-
-    public object Post(SaveDiscoveredBulbConfigRequest request)
-    {
-        try
-        {
-            var entry = ServerEntryPoint.Instance;
-            if (entry == null)
-                return new SaveDiscoveredBulbConfigResponse { Success = false, Error = "Plugin not initialized" };
-
-            var pluginOptions = Plugin.Instance?.GetPluginOptions();
-            if (pluginOptions == null)
-                return new SaveDiscoveredBulbConfigResponse { Success = false, Error = "Plugin options not available" };
-
-            if (request.BulbsJson != null)
-                pluginOptions.BulbConfigJson = request.BulbsJson;
-
-            if (request.MappingProfiles != null)
-            {
-                pluginOptions.MappingProfilesJson = JsonSerializer.Serialize(request.MappingProfiles, JsonOptions);
-                // Auto-activate the first profile if the current active profile no longer exists
-                var profileNames = request.MappingProfiles.Select(p => p.Name).ToList();
-                if (profileNames.Count > 0 && !profileNames.Contains(pluginOptions.ActiveProfileName))
-                    pluginOptions.ActiveProfileName = profileNames[0];
-            }
-
-            Plugin.Instance!.SavePluginOptions(pluginOptions);
-
-            var bulbCount = entry.ConfigService.ParseBulbConfig(pluginOptions.BulbConfigJson).Count;
-            return new SaveDiscoveredBulbConfigResponse
-            {
-                Success = true,
-                ConfiguredBulbCount = bulbCount
-            };
-        }
-        catch (Exception ex)
-        {
-            return new SaveDiscoveredBulbConfigResponse { Success = false, Error = ex.Message };
         }
     }
 

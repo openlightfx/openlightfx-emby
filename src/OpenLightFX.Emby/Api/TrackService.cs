@@ -22,10 +22,6 @@ public class GetSettings : IReturn<SettingsResponse> { }
 [Route("/OpenLightFX/Settings", "PUT", Description = "Partial update plugin settings")]
 public class UpdateSettings : IReturn<SettingsResponse>
 {
-    public string? BulbConfigJson { get; set; }
-    public string? MappingProfilesJson { get; set; }
-    public string? ActiveProfileName { get; set; }
-    public string? DeviceProfileOverridesJson { get; set; }
     public int? GlobalTimeOffsetMs { get; set; }
     public int? GlobalBrightnessCap { get; set; }
     public int? LookaheadBufferMs { get; set; }
@@ -83,9 +79,6 @@ public class PluginStatusResponse
     [JsonPropertyName("configuredBulbCount")]
     public int ConfiguredBulbCount { get; set; }
 
-    [JsonPropertyName("activeProfileName")]
-    public string ActiveProfileName { get; set; } = "Default";
-
     [JsonPropertyName("sessions")]
     public List<SessionStatusEntry> Sessions { get; set; } = new();
 }
@@ -102,22 +95,6 @@ public class SessionStatusEntry
 [DataContract]
 public class SettingsResponse
 {
-    [DataMember(Name = "bulbConfigJson")]
-    [JsonPropertyName("bulbConfigJson")]
-    public string BulbConfigJson { get; set; } = "[]";
-
-    [DataMember(Name = "mappingProfilesJson")]
-    [JsonPropertyName("mappingProfilesJson")]
-    public string MappingProfilesJson { get; set; } = "[]";
-
-    [DataMember(Name = "activeProfileName")]
-    [JsonPropertyName("activeProfileName")]
-    public string ActiveProfileName { get; set; } = "Default";
-
-    [DataMember(Name = "deviceProfileOverridesJson")]
-    [JsonPropertyName("deviceProfileOverridesJson")]
-    public string DeviceProfileOverridesJson { get; set; } = "{}";
-
     [DataMember(Name = "globalTimeOffsetMs")]
     [JsonPropertyName("globalTimeOffsetMs")]
     public int GlobalTimeOffsetMs { get; set; }
@@ -296,12 +273,7 @@ public class TrackService : IService
 
     public object Get(GetStatus request)
     {
-        var options = Plugin.Instance?.GetPluginOptions();
-        var configService = ServerEntryPoint.Instance?.ConfigService ?? _configService;
-
-        var bulbCount = options != null
-            ? configService.ParseBulbConfig(options.BulbConfigJson).Count
-            : 0;
+        var bulbCount = ServerEntryPoint.Instance?.RoomStore.Bulbs.Count ?? 0;
 
         var sessions = ServerEntryPoint.Instance?.GetActiveSessionInfo()
             .Select(s => new SessionStatusEntry
@@ -315,7 +287,6 @@ public class TrackService : IService
             Version = Plugin.Instance?.GetPluginInfo().Version?.ToString() ?? "unknown",
             ActiveSessions = sessions.Count,
             ConfiguredBulbCount = bulbCount,
-            ActiveProfileName = options?.ActiveProfileName ?? "Default",
             Sessions = sessions
         };
     }
@@ -336,18 +307,6 @@ public class TrackService : IService
         {
             Plugin.Instance!.UpdateOptions(options =>
             {
-                if (request.BulbConfigJson != null)
-                    options.BulbConfigJson = request.BulbConfigJson;
-
-                if (request.MappingProfilesJson != null)
-                    options.MappingProfilesJson = request.MappingProfilesJson;
-
-                if (request.ActiveProfileName != null)
-                    options.ActiveProfileName = request.ActiveProfileName;
-
-                if (request.DeviceProfileOverridesJson != null)
-                    options.DeviceProfileOverridesJson = request.DeviceProfileOverridesJson;
-
                 if (request.GlobalTimeOffsetMs.HasValue)
                     options.GlobalTimeOffsetMs = request.GlobalTimeOffsetMs.Value;
 
@@ -539,12 +498,7 @@ public class TrackService : IService
     {
         try
         {
-            var options = Plugin.Instance?.GetPluginOptions();
-            if (options == null)
-                return new BulbTestResponse { BulbId = request.BulbId, Success = false, Error = "Plugin not configured" };
-
-            var bulbs = _configService.ParseBulbConfig(options.BulbConfigJson);
-            var bulbConfig = bulbs.FirstOrDefault(b => b.Id == request.BulbId);
+            var bulbConfig = ServerEntryPoint.Instance?.RoomStore.FindBulb(request.BulbId)?.Config;
 
             if (bulbConfig == null)
                 return new BulbTestResponse { BulbId = request.BulbId, Success = false, Error = "Bulb not found" };
@@ -583,10 +537,6 @@ public class TrackService : IService
     {
         return new SettingsResponse
         {
-            BulbConfigJson = options.BulbConfigJson,
-            MappingProfilesJson = options.MappingProfilesJson,
-            ActiveProfileName = options.ActiveProfileName,
-            DeviceProfileOverridesJson = options.DeviceProfileOverridesJson,
             GlobalTimeOffsetMs = options.GlobalTimeOffsetMs,
             GlobalBrightnessCap = options.GlobalBrightnessCap,
             LookaheadBufferMs = options.LookaheadBufferMs,

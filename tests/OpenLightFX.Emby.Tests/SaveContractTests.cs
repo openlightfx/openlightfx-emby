@@ -35,15 +35,13 @@ public class StudioJsonNameTests
     [Fact(DisplayName = "PLUG-006 @fixture settings JSON includes photosensitivityMode")]
     public void Settings_include_photosensitivity_mode()
     {
-        var json = SsJson.SerializeToString(new SettingsResponse
-        {
-            PhotosensitivityMode = true,
-            MappingProfilesJson = "[{\"name\":\"Default\",\"mappings\":[{\"channelId\":\"left\",\"bulbIds\":[\"b1\"]}]}]"
-        });
+        var json = SsJson.SerializeToString(new SettingsResponse { PhotosensitivityMode = true });
 
         using var doc = JsonDocument.Parse(json);
         Assert.True(doc.RootElement.GetProperty("photosensitivityMode").GetBoolean());
-        Assert.Contains("left", doc.RootElement.GetProperty("mappingProfilesJson").GetString());
+        Assert.False(doc.RootElement.TryGetProperty("bulbConfigJson", out _));
+        Assert.False(doc.RootElement.TryGetProperty("mappingProfilesJson", out _));
+        Assert.False(doc.RootElement.TryGetProperty("deviceProfileOverridesJson", out _));
         Assert.Contains("trackPath", SsJson.SerializeToString(new TrackSummary { TrackPath = "lightfx/proxy-fixture.lightfx" }));
     }
 }

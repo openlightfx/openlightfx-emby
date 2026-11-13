@@ -25,7 +25,6 @@ public abstract class BulbConfig
     public IPAddress IpAddress { get; set; } = IPAddress.None;
 
     public int Port { get; set; }
-    public string? SpatialPosition { get; set; }
     public string? MacAddress { get; set; }
     public string? Model { get; set; }
 

@@ -14,6 +14,7 @@ using OpenLightFX.Emby.Engine;
 using OpenLightFX.Emby.Models;
 using OpenLightFX.Emby.Services;
 using OpenLightFX.Emby.Studio;
+using OpenLightFX.Emby.Rooms;
 using OpenLightFX.Emby.Utilities;
 using Openlightfx;
 using System.Collections.Concurrent;
@@ -56,6 +57,7 @@ public class ServerEntryPoint : IServerEntryPoint
 
     private readonly StudioPreviewHost _preview = new();
     private readonly StudioTrackIndex _studioTrackIndex;
+    private readonly RoomStore _roomStore;
 
     public ServerEntryPoint(
         ISessionManager sessionManager,
@@ -79,6 +81,7 @@ public class ServerEntryPoint : IServerEntryPoint
         _identifyService = new IdentifyService();
         _studioTrackIndex = new StudioTrackIndex(
             Path.Combine(appPaths.DataPath, "openlightfx-studio-tracks.json"));
+        _roomStore = new RoomStore(appPaths.DataPath);
 
         Instance = this;
     }
@@ -324,51 +327,35 @@ public class ServerEntryPoint : IServerEntryPoint
                     _logger.Warn("Safety warning for '{0}': {1}", item.Name, warning);
             }
 
-            var bulbs = _configService.ParseBulbConfig(options.BulbConfigJson);
-            var profiles = _configService.ParseMappingProfiles(options.MappingProfilesJson);
-
-            // Per-device mapping profile overrides (EMB-037)
-            var profileName = options.ActiveProfileName;
-            if (!string.IsNullOrEmpty(deviceId))
+            var room = string.IsNullOrWhiteSpace(deviceId)
+                ? null
+                : _roomStore.Rooms.FirstOrDefault(candidate => candidate.Screen.DeviceId == deviceId);
+            if (room == null)
             {
-                var overrides = _configService.ParseDeviceProfileOverrides(options.DeviceProfileOverridesJson);
-                if (overrides.TryGetValue(deviceId, out var overrideName))
-                {
-                    // Verify the override profile exists; fall back to ActiveProfileName if not
-                    if (profiles.Any(p => string.Equals(p.Name, overrideName, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        profileName = overrideName;
-                        _logger.Debug("Using device-specific profile '{0}' for device {1}", overrideName, deviceId);
-                    }
-                    else
-                    {
-                        _logger.Warn("Device override profile '{0}' not found for device {1} — falling back to '{2}'",
-                            overrideName, deviceId, options.ActiveProfileName);
-                    }
-                }
+                _logger.Info("Device {0} is not assigned to a room; skipping lighting for '{1}'", deviceId ?? "(unknown)", item.Name);
+                return;
             }
 
-            var profile = profiles.FirstOrDefault(p =>
-                string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase))
-                ?? profiles.FirstOrDefault();
-
-            _logger.Debug("Config: {0} bulb(s), {1} profile(s), active='{2}'",
-                bulbs.Count, profiles.Count, profileName);
-
+            var knownBulbs = _roomStore.Bulbs;
+            var bulbs = room.Bulbs
+                .Where(assignment => assignment.Position != null || assignment.Follows != null)
+                .Select(assignment => knownBulbs.FirstOrDefault(bulb => bulb.Id == assignment.Id)?.Config)
+                .Where(config => config != null)
+                .Cast<BulbConfig>()
+                .ToList();
             if (bulbs.Count == 0)
             {
-                _logger.Warn("No bulbs configured — skipping lighting for '{0}'", item.Name);
+                _logger.Warn("Room '{0}' has no placed bulbs — skipping lighting for '{1}'", room.Name, item.Name);
                 return;
             }
 
-            if (profile == null)
+            var profile = RoomPlaybackMapping.Create(room, knownBulbs, trackInfo.Track);
+            if (profile.Mappings.Count == 0)
             {
-                _logger.Warn("No mapping profile '{0}' found — skipping lighting for '{1}'",
-                    profileName, item.Name);
+                _logger.Warn("Room '{0}' has no bulbs matching the track channels — skipping lighting for '{1}'", room.Name, item.Name);
                 return;
             }
-
-            _logger.Debug("Profile '{0}': {1} channel mapping(s)", profile.Name, profile.Mappings.Count);
+            _logger.Debug("Room '{0}': {1} bulb(s), {2} channel mapping(s)", room.Name, bulbs.Count, profile.Mappings.Count);
 
             var session = new PlaybackSession(trackInfo, bulbs, profile, options, _effectFactory, _logger);
 
@@ -421,13 +408,13 @@ public class ServerEntryPoint : IServerEntryPoint
     public ISessionManager SessionManager => _sessionManager;
     public TrackDiscoveryService TrackDiscoveryService => _trackDiscoveryService;
     public TrackSelectionService SelectionService => _selectionService;
-    public ConfigurationService ConfigService => _configService;
     public DiscoveredBulbStore DiscoveredBulbStore => _discoveredBulbStore;
     public DiscoveryCoordinator DiscoveryCoordinator => _discoveryCoordinator;
     public IdentifyService IdentifyService => _identifyService;
     public ILibraryManager LibraryManager => _libraryManager;
     public StudioPreviewHost Preview => _preview;
     public StudioTrackIndex StudioTrackIndex => _studioTrackIndex;
+    public RoomStore RoomStore => _roomStore;
 
     /// <summary>Get lighting enabled state for a session (EMB-152).</summary>
     public bool IsLightingEnabled(string sessionId) =>

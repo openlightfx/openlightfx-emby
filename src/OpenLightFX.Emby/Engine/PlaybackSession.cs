@@ -20,7 +20,6 @@ public class PlaybackSession
     private readonly TrackInfo _trackInfo;
     private readonly LightFXTrack _track;
     private readonly List<BulbConfig> _bulbConfigs;
-    private readonly MappingProfile _profile;
     private readonly PluginOptions _options;
     private readonly EffectRendererFactory _effectFactory;
     private readonly ILogger _logger;
@@ -63,7 +62,7 @@ public class PlaybackSession
     public PlaybackSession(
         TrackInfo trackInfo,
         List<BulbConfig> bulbConfigs,
-        MappingProfile profile,
+        PlaybackMapping mapping,
         PluginOptions options,
         EffectRendererFactory effectFactory,
         ILogger logger)
@@ -71,13 +70,12 @@ public class PlaybackSession
         _trackInfo = trackInfo;
         _track = trackInfo.Track;
         _bulbConfigs = bulbConfigs;
-        _profile = profile;
         _options = options;
         _effectFactory = effectFactory;
         _logger = logger;
 
         var brightnessCap = (uint)Math.Clamp(options.GlobalBrightnessCap, 0, 100);
-        _channelManager = new ChannelManager(_track, profile, brightnessCap);
+        _channelManager = new ChannelManager(_track, mapping, brightnessCap);
 
         // Pre-sort keyframes by (channelId, timestampMs) for efficient lookup
         _sortedKeyframes = _track.Keyframes

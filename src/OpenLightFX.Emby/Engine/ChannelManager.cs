@@ -10,7 +10,6 @@ namespace OpenLightFX.Emby.Engine;
 public class ChannelManager
 {
     private readonly LightFXTrack _track;
-    private readonly MappingProfile _profile;
     private readonly uint _brightnessCap; // 0-100
 
     // Current state per channel
@@ -19,25 +18,23 @@ public class ChannelManager
     // Channel definitions indexed by ID
     private readonly Dictionary<string, Channel> _channels = new();
 
-    // Reverse map: bulbId → list of channelIds (first listed in mapping profile wins per EMB-032)
+    // Reverse map: bulbId → list of channelIds (first mapping source wins).
     private readonly Dictionary<string, List<string>> _bulbToChannels = new();
 
-    public ChannelManager(LightFXTrack track, MappingProfile profile, uint brightnessCap)
+    public ChannelManager(LightFXTrack track, PlaybackMapping mapping, uint brightnessCap)
     {
         _track = track;
-        _profile = profile;
         _brightnessCap = Math.Clamp(brightnessCap, 0u, 100u);
 
         foreach (var ch in track.Channels)
             _channels[ch.Id] = ch;
 
-        // Build reverse bulb-to-channel map; first channel listed in the profile wins (EMB-032).
-        // Profile channelId is resolved against track channel id first, then display_name
+        // Build reverse bulb-to-channel map; track channel id is resolved first, then display_name
         // (case-insensitive), so human-readable names like "Left" work alongside UUIDs.
-        foreach (var mapping in profile.Mappings)
+        foreach (var channelMapping in mapping.Mappings)
         {
-            var resolvedId = ResolveChannelId(mapping.ChannelId);
-            foreach (var bulbId in mapping.BulbIds)
+            var resolvedId = ResolveChannelId(channelMapping.ChannelId);
+            foreach (var bulbId in channelMapping.BulbIds)
             {
                 if (!_bulbToChannels.ContainsKey(bulbId))
                     _bulbToChannels[bulbId] = new();
@@ -87,7 +84,7 @@ public class ChannelManager
         if (!_bulbToChannels.TryGetValue(bulbId, out var channels) || channels.Count == 0)
             return null;
 
-        // First channel listed in the mapping profile wins (EMB-032)
+        // First position source wins when a room bulb receives more than one mapping.
         var channelId = channels[0];
         if (!_channelStates.TryGetValue(channelId, out var state))
             return null;
@@ -109,45 +106,25 @@ public class ChannelManager
     public IEnumerable<string> GetChannelIds() => _channels.Keys;
 
     /// <summary>
-    /// Resolve a profile channelId to a track channel id.
+    /// Resolve a channel mapping id to a track channel id.
     /// Matches by channel id first, then falls back to display_name (case-insensitive).
     /// Returns the original value unchanged if no match is found.
     /// </summary>
-    private string ResolveChannelId(string profileChannelId)
+    private string ResolveChannelId(string mappedChannelId)
     {
         // Exact id match
-        if (_channels.ContainsKey(profileChannelId))
-            return profileChannelId;
+        if (_channels.ContainsKey(mappedChannelId))
+            return mappedChannelId;
 
         // Display name match (case-insensitive)
         var byName = _channels.Values.FirstOrDefault(ch =>
-            string.Equals(ch.DisplayName, profileChannelId, StringComparison.OrdinalIgnoreCase));
+            string.Equals(ch.DisplayName, mappedChannelId, StringComparison.OrdinalIgnoreCase));
         if (byName != null)
             return byName.Id;
 
-        return profileChannelId; // unresolved — will produce no state match at dispatch time
+        return mappedChannelId; // unresolved — will produce no state match at dispatch time
     }
 
-    /// <summary>
-    /// Auto-mapping suggestions based on spatial hints (EMB-036).
-    /// </summary>
-    public static Dictionary<string, string> SuggestMapping(
-        IEnumerable<Channel> channels, IEnumerable<BulbConfig> bulbs)
-    {
-        var suggestions = new Dictionary<string, string>();
-        var bulbList = bulbs.ToList();
-
-        foreach (var ch in channels)
-        {
-            if (string.IsNullOrEmpty(ch.SpatialHint)) continue;
-            var match = bulbList.FirstOrDefault(b =>
-                string.Equals(b.SpatialPosition, ch.SpatialHint, StringComparison.OrdinalIgnoreCase));
-            if (match != null)
-                suggestions[ch.Id] = match.Id;
-        }
-
-        return suggestions;
-    }
 }
 
 /// <summary>

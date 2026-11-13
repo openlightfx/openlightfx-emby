@@ -7,33 +7,8 @@ using System.ComponentModel;
 public class PluginOptions : EditableOptionsBase
 {
     public override string EditorTitle => "OpenLightFX Settings";
-    public override string EditorDescription => "Configure smart bulb ambient lighting for movie playback. " +
-        "Use the Bulb Setup Wizard at openlightfx.com/config to discover and configure bulbs, " +
-        "then paste the exported JSON below. Open the track editor at /emby/OpenLightFX/studio/.";
-
-    // --- Bulb Configuration ---
-    [DisplayName("Bulb Configuration JSON")]
-    [Description("Paste the bulb configuration JSON exported from openlightfx.com/config. " +
-        "This defines your smart bulb inventory (names, protocols, IP addresses).")]
-    [EditMultiline(6)]
-    public string BulbConfigJson { get; set; } = "[]";
-
-    // --- Mapping Profiles ---
-    [DisplayName("Mapping Profiles JSON")]
-    [Description("Paste the mapping profiles JSON from openlightfx.com/config. " +
-        "Profiles define how track channels map to your physical bulbs.")]
-    [EditMultiline(6)]
-    public string MappingProfilesJson { get; set; } = "[]";
-
-    [DisplayName("Active Profile Name")]
-    [Description("Name of the mapping profile to use during playback.")]
-    public string ActiveProfileName { get; set; } = "Default";
-
-    [DisplayName("Device Profile Overrides JSON")]
-    [Description("JSON object mapping deviceId to profileName for per-device mapping profile overrides. " +
-        "Example: {\"device-guid\": \"Bedroom 2-bulb\"}")]
-    [EditMultiline(4)]
-    public string DeviceProfileOverridesJson { get; set; } = "{}";
+    public override string EditorDescription => "Set up rooms and bulbs in OpenLightFX Studio. " +
+        "Open the room setup and track editor at /emby/OpenLightFX/studio/.";
 
     // --- Playback Settings ---
     [DisplayName("Global Time Offset (ms)")]
