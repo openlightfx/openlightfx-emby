@@ -1,5 +1,7 @@
 # Copilot Instructions — OpenLightFX Emby Plugin
 
+> **Read [`AGENTS.md`](../AGENTS.md) first.** It supersedes this file where they differ: this repo now has xUnit tests, a full-stack test in the Studio repo, and agents must never run `scripts/deploy.sh`.
+
 ## Build & Deploy
 
 ```bash
