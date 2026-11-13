@@ -7,6 +7,7 @@ public sealed class StudioProxyJob
 {
     private long _encodedThroughMs;
     private int _state; // 0 building, 1 ready, 2 failed
+    private string _reason = "";
 
     public StudioProxyJob(string itemId, string outputPath, double fps, int width, int height)
     {
@@ -25,6 +26,39 @@ public sealed class StudioProxyJob
     public int Height { get; }
     public int KeyframeIntervalMs { get; }
     public long EncodedThroughMs => Interlocked.Read(ref _encodedThroughMs);
+    public string Reason => Volatile.Read(ref _reason);
+
+    /// <summary>
+    /// Written only after ffmpeg exits 0. A proxy file without it was cut short, for
+    /// example by an Emby restart mid-encode, and must not be served as finished.
+    /// </summary>
+    public string CompleteMarkerPath => CompleteMarker(OutputPath);
+
+    public static string CompleteMarker(string outputPath) => outputPath + ".complete";
+
+    public static bool IsComplete(string outputPath) =>
+        File.Exists(outputPath)
+        && new FileInfo(outputPath).Length > 0
+        && File.Exists(CompleteMarker(outputPath));
+
+    /// <summary>Removes a partial proxy and its marker so the next encode starts clean.</summary>
+    public static void DiscardPartial(string outputPath)
+    {
+        foreach (var path in new[] { CompleteMarker(outputPath), outputPath })
+        {
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+    }
 
     public string State => _state switch
     {
@@ -53,7 +87,11 @@ public sealed class StudioProxyJob
         while (Interlocked.CompareExchange(ref _encodedThroughMs, encodedThroughMs, current) != current);
     }
 
-    public void MarkFailed() => Volatile.Write(ref _state, 2);
+    public void MarkFailed(string? reason = null)
+    {
+        Volatile.Write(ref _reason, StudioProxyReadPlan.PublicReason(reason));
+        Volatile.Write(ref _state, 2);
+    }
 
     public void Start(string ffmpegPath, IReadOnlyList<string> arguments)
     {
@@ -72,13 +110,16 @@ public sealed class StudioProxyJob
             try
             {
                 if (process.ExitCode == 0 && File.Exists(OutputPath))
+                {
+                    File.WriteAllText(CompleteMarkerPath, "ok");
                     MarkReady(Math.Max(EncodedThroughMs, 0));
+                }
                 else
-                    MarkFailed();
+                    MarkFailed($"ffmpeg exited with code {process.ExitCode}");
             }
             catch
             {
-                MarkFailed();
+                MarkFailed("ffmpeg exited with code unknown");
             }
             finally
             {
@@ -88,7 +129,7 @@ public sealed class StudioProxyJob
 
         if (!process.Start())
         {
-            MarkFailed();
+            MarkFailed("ffmpeg failed to start");
             return;
         }
 
@@ -112,6 +153,40 @@ public static class StudioProxyCache
         Jobs.GetOrAdd(itemId, _ => create());
 
     public static bool TryGet(string itemId, out StudioProxyJob job) => Jobs.TryGetValue(itemId, out job!);
+
+    public static void Forget(string itemId)
+    {
+        if (!Jobs.TryRemove(itemId, out var job))
+            return;
+        try
+        {
+            if (File.Exists(job.CompleteMarkerPath))
+                File.Delete(job.CompleteMarkerPath);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        // A partial file would be treated as a finished proxy on the next build.
+        if (!File.Exists(job.OutputPath))
+            return;
+        try
+        {
+            File.Delete(job.OutputPath);
+        }
+        catch (IOException)
+        {
+            var aside = job.OutputPath + ".failed-" + Guid.NewGuid().ToString("N");
+            try { File.Move(job.OutputPath, aside); } catch { /* ffmpeg -y overwrites what it can */ }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // The next ffmpeg invocation uses -y. Leaving the partial file would mark the
+            // retry ready without encoding, so a failed delete is logged by the caller.
+        }
+    }
 }
 
 public static class StudioProcess
