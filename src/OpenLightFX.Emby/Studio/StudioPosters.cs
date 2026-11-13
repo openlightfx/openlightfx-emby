@@ -5,8 +5,8 @@ using MediaBrowser.Model.Entities;
 namespace OpenLightFX.Emby.Studio;
 
 /// <summary>
-/// Poster URLs use Emby's own Primary image route, on the same path prefix the
-/// request used, with the access token a plain image request can carry.
+/// Poster URLs use Emby's Primary image route. That route answers without an
+/// access token, so the URL does not carry one.
 /// </summary>
 public static class StudioPosters
 {
@@ -17,7 +17,7 @@ public static class StudioPosters
         return images.GetImageCacheTag(item, ImageType.Primary) ?? "";
     }
 
-    public static string? PosterUrl(string? absoluteRequestUri, string itemId, string? tag, string? apiKey)
+    public static string? PosterUrl(string? absoluteRequestUri, string itemId, string? tag)
     {
         if (string.IsNullOrEmpty(itemId) || string.IsNullOrEmpty(tag))
             return null;
@@ -25,13 +25,6 @@ public static class StudioPosters
         var origin = StudioStreamUrls.FromAbsoluteUri(absoluteRequestUri);
         var prefix = string.IsNullOrEmpty(origin.PathBase) ? "/emby" : origin.PathBase;
         var path = $"{origin.Origin}{prefix}/Items/{Uri.EscapeDataString(itemId)}/Images/Primary";
-        var query = new List<string>
-        {
-            "tag=" + Uri.EscapeDataString(tag),
-            "maxHeight=240"
-        };
-        if (!string.IsNullOrEmpty(apiKey))
-            query.Add("api_key=" + Uri.EscapeDataString(apiKey));
-        return path + "?" + string.Join('&', query);
+        return path + "?tag=" + Uri.EscapeDataString(tag) + "&maxHeight=240";
     }
 }

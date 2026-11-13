@@ -184,12 +184,12 @@ public class StudioStreamUrlTests
         var url = StudioPosters.PosterUrl(
             "http://host:8096/emby/OpenLightFX/Studio/Items?search=clip",
             "9001",
-            "harbor tag",
-            "token value");
+            "harbor tag");
 
         Assert.Equal(
-            "http://host:8096/emby/Items/9001/Images/Primary?tag=harbor%20tag&maxHeight=240&api_key=token%20value",
+            "http://host:8096/emby/Items/9001/Images/Primary?tag=harbor%20tag&maxHeight=240",
             url);
+        Assert.DoesNotContain("api_key", url, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -198,19 +198,29 @@ public class StudioStreamUrlTests
         var url = StudioPosters.PosterUrl(
             "http://host:8096/OpenLightFX/Studio/Items",
             "9001",
-            "abc",
-            "test-admin");
+            "abc");
 
-        Assert.StartsWith("http://host:8096/emby/Items/9001/Images/Primary?", url);
-        Assert.Contains("tag=abc", url);
-        Assert.Contains("api_key=test-admin", url);
+        Assert.Equal("http://host:8096/emby/Items/9001/Images/Primary?tag=abc&maxHeight=240", url);
+        Assert.DoesNotContain("api_key", url, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void Poster_url_is_absent_without_a_primary_tag()
     {
-        Assert.Null(StudioPosters.PosterUrl("http://host:8096/emby/OpenLightFX/Studio/Items", "9001", "", "test-admin"));
-        Assert.Null(StudioPosters.PosterUrl("http://host:8096/emby/OpenLightFX/Studio/Items", "9001", null, "test-admin"));
+        Assert.Null(StudioPosters.PosterUrl("http://host:8096/emby/OpenLightFX/Studio/Items", "9001", ""));
+        Assert.Null(StudioPosters.PosterUrl("http://host:8096/emby/OpenLightFX/Studio/Items", "9001", null));
+    }
+
+    [Fact]
+    public void Playback_uses_the_studio_cookie_when_the_url_has_no_token()
+    {
+        Assert.Equal(
+            "token value",
+            StudioSessionAuth.PresentedToken(null, "olfx_studio_auth=token%20value"));
+        Assert.Equal(
+            "header-token",
+            StudioSessionAuth.PresentedToken("header-token", "olfx_studio_auth=cookie-token"));
+        Assert.Null(StudioSessionAuth.PresentedToken(null, null));
     }
 
     [Fact]

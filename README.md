@@ -108,7 +108,7 @@ The plugin discovers `.lightfx` files using:
 | `/OpenLightFX/Studio/Preview/Frame` | POST | Send a preview frame (admin) |
 | `/OpenLightFX/Studio/Preview/Stop` | POST | Stop preview and restore bulbs (admin) |
 
-Studio's static editor is served at `/emby/OpenLightFX/studio/` (Emby also exposes the same route at `/OpenLightFX/studio/`). The dist should use relative asset URLs, or base `/emby/OpenLightFX/studio/`. The first request must carry an Emby access token (`?api_key=` or `X-Emby-Token`); the plugin sets an HttpOnly cookie so the SPA's scripts and styles load. API calls use `X-Emby-Token`. Saving tracks and preview require an administrator. A `<video>` element cannot send that header, so `StreamUrl` appends the token as `api_key`.
+Studio's static editor is served at `/emby/OpenLightFX/studio/` (Emby also exposes the same route at `/OpenLightFX/studio/`). The dist should use relative asset URLs, or base `/emby/OpenLightFX/studio/`. The first request must carry an Emby access token (`?api_key=` or `X-Emby-Token`); the plugin sets an HttpOnly cookie so the SPA's scripts and styles load. API calls use `X-Emby-Token`. Saving tracks and preview require an administrator. A `<video>` element cannot send that header. The edit proxy accepts the same HttpOnly cookie the studio page sets, so `editUrl` does not include `api_key`. `StreamUrl` still appends the token because that URL is Emby's own video endpoint.
 
 ## Architecture
 

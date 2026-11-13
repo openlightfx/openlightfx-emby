@@ -130,10 +130,9 @@ public class EditMediaTests
     {
         var url = StudioEditUrls.ProxyMedia(
             "http://127.0.0.1:8096/OpenLightFX/Studio/Items/1/MediaInfo",
-            "1",
-            "test-admin");
-        Assert.StartsWith("http://127.0.0.1:8096/OpenLightFX/Studio/Items/1/Proxy/Media", url);
-        Assert.Contains("api_key=test-admin", url);
+            "1");
+        Assert.Equal("http://127.0.0.1:8096/OpenLightFX/Studio/Items/1/Proxy/Media", url);
+        Assert.DoesNotContain("api_key", url, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Transcode", url, StringComparison.OrdinalIgnoreCase);
     }
 
