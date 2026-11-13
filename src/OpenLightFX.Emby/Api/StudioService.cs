@@ -461,7 +461,7 @@ public class StudioService : IService, IRequiresRequest
         var item = RequireItem(request.ItemId);
         var source = await ProbeAsync(item).ConfigureAwait(false);
         var job = EnsureProxy(item, source);
-        StudioSessionAuth.Remember(Request, StudioStreamUrls.ReadAccessToken(Request));
+        StudioSessionAuth.Remember(Request, StudioTicketScope.ProxyMedia);
         return ToMediaInfo(item, source, job);
     }
 
@@ -473,7 +473,7 @@ public class StudioService : IService, IRequiresRequest
         if (StudioProxyCache.TryGet(itemId, out var existing) && existing.State == "failed")
             StudioProxyCache.Forget(itemId);
         var job = EnsureProxy(item, source);
-        StudioSessionAuth.Remember(Request, StudioStreamUrls.ReadAccessToken(Request));
+        StudioSessionAuth.Remember(Request, StudioTicketScope.ProxyMedia);
         return ToProxy(job, EditUrl(itemId));
     }
 
@@ -514,7 +514,7 @@ public class StudioService : IService, IRequiresRequest
 
     public async Task<object> Get(GetStudioProxyMedia request)
     {
-        StudioSessionAuth.RequireToken(Request, _authentication, _users);
+        StudioSessionAuth.RequireToken(Request, StudioTicketScope.ProxyMedia, _authentication, _users);
         var item = RequireItem(request.ItemId);
         var source = await ProbeAsync(item).ConfigureAwait(false);
         var job = EnsureProxy(item, source);

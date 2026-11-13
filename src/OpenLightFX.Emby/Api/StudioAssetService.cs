@@ -58,8 +58,12 @@ public class StudioAssetService : IService, IRequiresRequest
         if (redirect != null)
             return _results.GetRedirectResult(redirect);
 
-        var token = StudioSessionAuth.RequireToken(Request, _authentication, _users);
-        StudioSessionAuth.Remember(Request, token);
+        StudioSessionAuth.RequireToken(Request, StudioTicketScope.Assets, _authentication, _users);
+        StudioSessionAuth.Remember(Request, StudioTicketScope.Assets);
+        if (StudioAssetAuth.ReadCookie(Request?.Headers?["Cookie"], StudioAssetAuth.LegacyCookieName) != null)
+            Request?.Response?.AddHeader(
+                "Set-Cookie",
+                StudioAssetAuth.ClearCookieHeader(StudioAssetAuth.LegacyCookieName, StudioSessionAuth.IsSecure(Request)));
 
         var asset = _catalog.Resolve(request.RelativePath);
         if (asset == null)

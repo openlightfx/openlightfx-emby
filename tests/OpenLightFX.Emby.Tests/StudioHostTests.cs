@@ -11,22 +11,74 @@ public class StudioAssetAuthTests
     public void Reads_the_studio_cookie()
     {
         var token = StudioAssetAuth.ReadCookie(
-            "other=1; olfx_studio_auth=abc%2F123; theme=dark",
-            StudioAssetAuth.CookieName);
+            "other=1; olfx_studio_media=abc%2F123; theme=dark",
+            "olfx_studio_media");
 
         Assert.Equal("abc/123", token);
     }
 
     [Fact]
-    public void Cookie_is_http_only_and_covers_asset_requests()
+    public void Cookie_is_http_only_strict_secure_on_https_and_expires()
     {
-        var header = StudioAssetAuth.SetCookieHeader("tok en", secure: true);
+        var header = StudioAssetAuth.SetCookieHeader("olfx_studio_media", "tick et", secure: true, TimeSpan.FromHours(8));
 
-        Assert.Contains("olfx_studio_auth=tok%20en", header);
+        Assert.Contains("olfx_studio_media=tick%20et", header);
         Assert.Contains("Path=/", header);
+        Assert.Contains("Max-Age=28800", header);
         Assert.Contains("HttpOnly", header);
-        Assert.Contains("SameSite=Lax", header);
-        Assert.Contains("Secure", header);
+        Assert.Contains("SameSite=Strict", header);
+        Assert.Contains("; Secure", header);
+        Assert.DoesNotContain("Secure", StudioAssetAuth.SetCookieHeader("n", "v", secure: false, TimeSpan.FromHours(1)));
+        Assert.Contains("Max-Age=0", StudioAssetAuth.ClearCookieHeader(StudioAssetAuth.LegacyCookieName, secure: true));
+    }
+}
+
+public class StudioCookieTicketTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 11, 12, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void Ticket_is_opaque_and_redeems_only_for_its_scope()
+    {
+        var ticket = StudioCookieTickets.Issue("emby-token", StudioTicketScope.ProxyMedia, Now);
+
+        Assert.DoesNotContain("emby-token", ticket);
+        Assert.True(ticket.Length >= 40);
+        Assert.Equal("emby-token", StudioCookieTickets.Redeem(ticket, StudioTicketScope.ProxyMedia, Now));
+        Assert.Null(StudioCookieTickets.Redeem(ticket, StudioTicketScope.Assets, Now));
+        Assert.Null(StudioCookieTickets.Redeem("emby-token", StudioTicketScope.ProxyMedia, Now));
+    }
+
+    [Fact]
+    public void Ticket_expires()
+    {
+        var ticket = StudioCookieTickets.Issue("emby-token", StudioTicketScope.ProxyMedia, Now);
+
+        Assert.NotNull(StudioCookieTickets.Redeem(ticket, StudioTicketScope.ProxyMedia, Now + StudioCookieTickets.Lifetime - TimeSpan.FromSeconds(1)));
+        Assert.Null(StudioCookieTickets.Redeem(ticket, StudioTicketScope.ProxyMedia, Now + StudioCookieTickets.Lifetime));
+    }
+
+    [Fact]
+    public void Old_ticket_rotates_and_keeps_only_a_short_grace()
+    {
+        var first = StudioCookieTickets.Issue("emby-token", StudioTicketScope.ProxyMedia, Now);
+        Assert.Equal(first, StudioCookieTickets.Rotate(first, "emby-token", StudioTicketScope.ProxyMedia, Now + TimeSpan.FromHours(1)));
+
+        var later = Now + TimeSpan.FromHours(5);
+        var second = StudioCookieTickets.Rotate(first, "emby-token", StudioTicketScope.ProxyMedia, later);
+        Assert.NotEqual(first, second);
+        Assert.NotNull(StudioCookieTickets.Redeem(first, StudioTicketScope.ProxyMedia, later + TimeSpan.FromSeconds(30)));
+        Assert.Null(StudioCookieTickets.Redeem(first, StudioTicketScope.ProxyMedia, later + StudioCookieTickets.RotationGrace));
+        Assert.Equal("emby-token", StudioCookieTickets.Redeem(second, StudioTicketScope.ProxyMedia, later + TimeSpan.FromHours(7)));
+    }
+
+    [Fact]
+    public void A_different_token_gets_a_new_ticket()
+    {
+        var first = StudioCookieTickets.Issue("token-a", StudioTicketScope.ProxyMedia, Now);
+        var second = StudioCookieTickets.Rotate(first, "token-b", StudioTicketScope.ProxyMedia, Now);
+        Assert.NotEqual(first, second);
+        Assert.Equal("token-b", StudioCookieTickets.Redeem(second, StudioTicketScope.ProxyMedia, Now));
     }
 }
 
@@ -212,15 +264,34 @@ public class StudioStreamUrlTests
     }
 
     [Fact]
-    public void Playback_uses_the_studio_cookie_when_the_url_has_no_token()
+    public void Playback_uses_the_media_ticket_when_the_url_has_no_token()
     {
+        var now = DateTimeOffset.UtcNow;
+        var ticket = StudioCookieTickets.Issue("token value", StudioTicketScope.ProxyMedia, now);
         Assert.Equal(
             "token value",
-            StudioSessionAuth.PresentedToken(null, "olfx_studio_auth=token%20value"));
+            StudioSessionAuth.PresentedToken(null, "olfx_studio_media=" + ticket, StudioTicketScope.ProxyMedia, now));
         Assert.Equal(
             "header-token",
-            StudioSessionAuth.PresentedToken("header-token", "olfx_studio_auth=cookie-token"));
-        Assert.Null(StudioSessionAuth.PresentedToken(null, null));
+            StudioSessionAuth.PresentedToken("header-token", "olfx_studio_media=" + ticket, StudioTicketScope.ProxyMedia, now));
+        Assert.Null(StudioSessionAuth.PresentedToken(null, null, StudioTicketScope.ProxyMedia, now));
+        // The legacy cookie held a raw access token. It is never accepted.
+        Assert.Null(StudioSessionAuth.PresentedToken(null, "olfx_studio_auth=token%20value", StudioTicketScope.ProxyMedia, now));
+        // A page ticket does not open the edit proxy.
+        var page = StudioCookieTickets.Issue("token value", StudioTicketScope.Assets, now);
+        Assert.Null(StudioSessionAuth.PresentedToken(null, "olfx_studio_media=" + page, StudioTicketScope.ProxyMedia, now));
+    }
+
+    [Theory]
+    [InlineData("GET", true)]
+    [InlineData("HEAD", true)]
+    [InlineData("POST", false)]
+    [InlineData("PUT", false)]
+    [InlineData("DELETE", false)]
+    [InlineData(null, false)]
+    public void Cookie_tickets_are_only_for_reads(string? method, bool allowed)
+    {
+        Assert.Equal(allowed, StudioSessionAuth.CookieAllowedFor(method));
     }
 
     [Fact]
