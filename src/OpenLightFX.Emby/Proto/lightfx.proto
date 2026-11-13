@@ -75,6 +75,10 @@ message TrackMetadata {
   // Informational only — not parsed by playback engines. Independent of the Marketplace
   // version history, which is managed server-side.
   string track_version = 13;
+
+  // Declared channel layout. Empty means this is a pre-layout track.
+  // Values: LAYOUT_AMBIENT, LAYOUT_2_0, LAYOUT_3_0, LAYOUT_5_0.
+  string channel_layout = 14;
 }
 
 message MovieReference {

@@ -225,14 +225,14 @@ Studio preview follows the same steps 3–6 with the room picked in Studio inste
 | `Rooms/RoomStore.cs`                                               | new        | Load, validate, atomically save `rooms.json`; one shared instance.                                           |
 | `Rooms/Room.cs`, `Rooms/KnownBulb.cs`, `Rooms/Position.cs`         | new        | Room and bulb model. `Position.Parse` accepts supported position spellings.                                  |
 | `Rooms/StableBulbId.cs`                                            | new        | Id rules above.                                                                                              |
-| `Rooms/TrackLayout.cs`                                             | new        | Layout constants, inference for existing tracks, V-012/V-013 helpers.                                        |
+| `Rooms/TrackLayout.cs`                                             | new        | Layout constants, inference for existing tracks, V-022/V-023 helpers.                                        |
 | `Rooms/RoomRouter.cs`                                              | new        | Fold-down, fill, follows. Pure; tested against `tests/fixtures/routing/cases.json`.                          |
 | `Rooms/BulbMixer.cs`                                               | new        | Mixing rule. Pure.                                                                                           |
 | `Api/RoomsService.cs`                                              | new        | The routes above.                                                                                            |
 | `Engine/ChannelManager.cs`, `Engine/PlaybackSession.cs`            | changed    | Consume room-derived channel-to-bulb mappings for playback.                                                  |
 | `ServerEntryPoint.cs`                                              | changed    | Steps 1–6; shares `RoomStore` and one `TrackSelectionService`.                                               |
 | `Api/StudioService.cs`                                             | changed    | Preview start/frame bodies; ActiveTrack; Items counts; remove `RememberMapping`.                             |
-| `Services/TrackParser.cs`                                          | changed    | V-012, V-013 when `channel_layout` is set.                                                                   |
+| `Services/TrackParser.cs`                                          | changed    | V-022, V-023 when `channel_layout` is set.                                                                   |
 | `Proto/lightfx.proto`                                              | changed    | FP-2 field 14 and FP-3 comment. Copy kept identical to Studio's `proto/lightfx.proto`.                       |
 | `Configuration/PluginOptions.cs`                                   | changed    | Removes pasted bulb JSON, mapping profiles, active profile, and device overrides; retains playback settings. |
 | `Studio/StudioMappingProfiles.cs`, `ChannelManager.SuggestMapping` | removed    | Superseded by `RoomRouter`.                                                                                  |
@@ -246,7 +246,7 @@ Wireframe: Studio `docs/journeys/wireframes/07-plugin-settings.png`.
 
 ## Tests
 
-- **Unit (xUnit, `tests/OpenLightFX.Emby.Tests`)**: `RoomRouterTests` and `BulbMixerTests` over the shared routing fixture; `StableBulbIdTests`; `RoomStoreTests` (atomic write, `If-Match`, one room per bulb and per device); `TrackLayoutTests` (inference on a copy of John Wick's channel list, V-012/V-013).
+- **Unit (xUnit, `tests/OpenLightFX.Emby.Tests`)**: `RoomRouterTests` and `BulbMixerTests` over the shared routing fixture; `StableBulbIdTests`; `RoomStoreTests` (atomic write, `If-Match`, one room per bulb and per device); `TrackLayoutTests` (inference on a copy of John Wick's channel list, V-022/V-023).
 - **Shared fixtures**: `tests/fixtures/routing/cases.json` is authored in the Studio repo and copied byte-for-byte here, as `tests/fixtures/sampling` already is. A test fails if the copies differ in `SOURCE`.
 - **Full stack** (Studio repo, `OLFX_FULLSTACK_REQUIRE=1 npm run test:fullstack`): discovery and Identify against the simulator's NDJSON, room CRUD, preview through a room, and Emby playback on a device assigned to a room and one that is not.
 

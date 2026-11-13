@@ -3,6 +3,7 @@ namespace OpenLightFX.Emby.Services;
 using Google.Protobuf;
 using Openlightfx;
 using OpenLightFX.Emby.Models;
+using OpenLightFX.Emby.Rooms;
 using System.Text.RegularExpressions;
 
 public class TrackParser
@@ -83,6 +84,12 @@ public class TrackParser
         var imdbId = track.Metadata.MovieReference?.ImdbId;
         if (!string.IsNullOrEmpty(imdbId) && !ImdbPattern.IsMatch(imdbId))
             errors.Add($"V-003: Invalid IMDB ID format: {imdbId}");
+
+        if (!string.IsNullOrEmpty(track.Metadata.ChannelLayout))
+        {
+            var layoutError = TrackLayout.Validate(track.Metadata.ChannelLayout, track.Channels);
+            if (layoutError != null) errors.Add(layoutError);
+        }
 
         // V-004: Duration must be > 0
         if (track.Metadata.DurationMs == 0)
