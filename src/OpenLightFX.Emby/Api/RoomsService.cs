@@ -104,6 +104,9 @@ public sealed class StudioDeviceDto
     [DataMember(Name = "deviceId"), JsonPropertyName("deviceId")] public string DeviceId { get; set; } = "";
     [DataMember(Name = "name"), JsonPropertyName("name")] public string Name { get; set; } = "";
     [DataMember(Name = "appName"), JsonPropertyName("appName")] public string AppName { get; set; } = "";
+    [DataMember(Name = "lastUserName"), JsonPropertyName("lastUserName")] public string? LastUserName { get; set; }
+    [DataMember(Name = "lastUserId"), JsonPropertyName("lastUserId")] public string? LastUserId { get; set; }
+    [DataMember(Name = "lastActivity"), JsonPropertyName("lastActivity")] public DateTimeOffset? LastActivity { get; set; }
     [DataMember(Name = "roomId"), JsonPropertyName("roomId")] public string? RoomId { get; set; }
     [DataMember(Name = "roomName"), JsonPropertyName("roomName")] public string? RoomName { get; set; }
 }
@@ -157,19 +160,19 @@ public sealed class RoomsService : IService, IRequiresRequest
         {
             var session = g.OrderByDescending(x => x.LastActivityDate).First();
             var room = rooms.FirstOrDefault(r => r.Screen.DeviceId == session.DeviceId);
-            return new StudioDeviceDto { DeviceId = session.DeviceId!, Name = session.DeviceName ?? "Unknown device", AppName = session.Client ?? "Emby", RoomId = room?.Id, RoomName = room?.Name };
+            return new StudioDeviceDto { DeviceId = session.DeviceId!, Name = session.DeviceName ?? "Unknown device", AppName = session.Client ?? "Emby", LastUserName = session.UserName, LastUserId = session.UserId, LastActivity = session.LastActivityDate, RoomId = room?.Id, RoomName = room?.Name };
         }).ToList();
         foreach (var registered in _deviceManager.GetDevices(new DeviceQuery { Limit = 500 }).Items ?? Array.Empty<DeviceInfo>())
         {
             var deviceId = registered.ReportedDeviceId;
             if (string.IsNullOrWhiteSpace(deviceId) || devices.Any(d => d.DeviceId == deviceId)) continue;
             var room = rooms.FirstOrDefault(r => r.Screen.DeviceId == deviceId);
-            devices.Add(new StudioDeviceDto { DeviceId = deviceId, Name = registered.Name ?? "Emby device", AppName = registered.AppName ?? "Emby", RoomId = room?.Id, RoomName = room?.Name });
+            devices.Add(new StudioDeviceDto { DeviceId = deviceId, Name = registered.Name ?? "Emby device", AppName = registered.AppName ?? "Emby", LastUserName = registered.LastUserName, LastUserId = registered.LastUserId, LastActivity = registered.DateLastActivity == default ? null : registered.DateLastActivity, RoomId = room?.Id, RoomName = room?.Name });
         }
         foreach (var room in rooms)
             if (!devices.Any(d => d.DeviceId == room.Screen.DeviceId))
                 devices.Add(new StudioDeviceDto { DeviceId = room.Screen.DeviceId, Name = room.Screen.DeviceName, AppName = room.Screen.AppName, RoomId = room.Id, RoomName = room.Name });
-        return devices;
+        return devices.OrderByDescending(device => device.LastActivity).ToList();
     }
 
     public object Post(DiscoverStudioBulbs request)
