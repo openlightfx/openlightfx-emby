@@ -32,6 +32,8 @@ public class GetStudioBulbs : IReturn<List<StudioBulbResponse>>
 public class GetStudioItems : IReturn<List<StudioItemResponse>>
 {
     public string? Search { get; set; }
+    public int? StartIndex { get; set; }
+    public int? Limit { get; set; }
 }
 
 [Route("/OpenLightFX/Studio/Items/{ItemId}/StreamUrl", "GET", Description = "Browser-playable video URL for a movie")]
@@ -213,6 +215,18 @@ public class StudioItemResponse
     [DataMember(Name = "posterUrl")]
     [JsonPropertyName("posterUrl")]
     public string? PosterUrl { get; set; }
+
+    [DataMember(Name = "dateAdded")]
+    [JsonPropertyName("dateAdded")]
+    public string DateAdded { get; set; } = "";
+
+    [DataMember(Name = "trackCount")]
+    [JsonPropertyName("trackCount")]
+    public int TrackCount { get; set; }
+
+    [DataMember(Name = "hasActiveTrack")]
+    [JsonPropertyName("hasActiveTrack")]
+    public bool HasActiveTrack { get; set; }
 }
 
 [DataContract]
@@ -414,7 +428,8 @@ public class StudioService : IService, IRequiresRequest
             IncludeItemTypes = new[] { "Movie" },
             Recursive = true,
             IsVirtualItem = false,
-            Limit = ItemSearchLimit
+            StartIndex = Math.Max(0, request.StartIndex ?? 0),
+            Limit = Math.Clamp(request.Limit ?? ItemSearchLimit, 1, ItemSearchLimit)
         };
 
         if (!string.IsNullOrWhiteSpace(request.Search))
@@ -428,6 +443,8 @@ public class StudioService : IService, IRequiresRequest
             {
                 var itemId = PublicItemId(item);
                 var tag = PrimaryImageTag(item);
+                var tracks = Discover(item);
+                var activePath = ServerEntryPoint.Instance?.SelectionService.GetGlobalSelectedTrack(itemId);
                 return new StudioItemResponse
                 {
                     ItemId = itemId,
@@ -437,10 +454,25 @@ public class StudioService : IService, IRequiresRequest
                         ? ticks / TimeSpan.TicksPerMillisecond
                         : 0,
                     PrimaryImageTag = tag,
-                    PosterUrl = StudioPosters.PosterUrl(requestUri, itemId, tag)
+                    PosterUrl = StudioPosters.PosterUrl(requestUri, itemId, tag),
+                    DateAdded = item.DateCreated.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture),
+                    TrackCount = tracks.Count,
+                    HasActiveTrack = !string.IsNullOrEmpty(activePath) && tracks.Any(track => PathsEqual(track.FilePath, activePath))
                 };
             })
             .ToList();
+    }
+
+    private static bool PathsEqual(string left, string right)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private string PrimaryImageTag(BaseItem item)
@@ -1073,7 +1105,6 @@ public class StudioService : IService, IRequiresRequest
 
         var discovery = ServerEntryPoint.Instance?.TrackDiscoveryService
             ?? new TrackDiscoveryService(_parser, _logger);
-        discovery.InvalidateCache(item.Path);
         var tracks = discovery.DiscoverTracks(item.Path, imdbId, scanPaths);
         return StudioTrackFiles.ToListItems(PublicItemId(item), tracks).ToList();
     }

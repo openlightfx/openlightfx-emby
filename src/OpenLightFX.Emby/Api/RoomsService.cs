@@ -107,6 +107,7 @@ public sealed class StudioDiscoveryDto
 {
     [DataMember(Name = "bulbs"), JsonPropertyName("bulbs")] public List<StudioBulbDto> Bulbs { get; set; } = new();
     [DataMember(Name = "hueBridges"), JsonPropertyName("hueBridges")] public List<object> HueBridges { get; set; } = new();
+    [DataMember(Name = "foundCount"), JsonPropertyName("foundCount")] public int FoundCount { get; set; }
 }
 
 public sealed class RoomsService : IService, IRequiresRequest
@@ -200,7 +201,12 @@ public sealed class RoomsService : IService, IRequiresRequest
             config.Port = bulb.Port; config.MacAddress = bulb.MacAddress; config.Model = bulb.Model;
             entry.RoomStore.UpsertBulb(config);
         }
-        return new StudioDiscoveryDto { Bulbs = entry.RoomStore.Bulbs.Select(MapBulb).ToList(), HueBridges = hueBridges };
+        return new StudioDiscoveryDto
+        {
+            Bulbs = entry.RoomStore.Bulbs.Select(MapBulb).ToList(),
+            HueBridges = hueBridges,
+            FoundCount = discovered.Count
+        };
     }
 
     public object Put(RenameStudioBulb request)

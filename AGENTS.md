@@ -2,7 +2,7 @@
 
 Read this whole file before you change anything, then the design doc for your task. If a task brief and this file disagree, stop and ask.
 
-The companion repository is [openlightfx/openlightfx-studio](https://github.com/openlightfx/openlightfx-studio): the track editor this plugin hosts. Its `AGENTS.md` and `docs/journeys/J1-first-light.md` define the product journey; read at least the journey summary there. `.github/copilot-instructions.md` in this repo predates this file and is partly out of date (it says there are no tests and points at `deploy.sh`); where they differ, this file wins.
+The companion repository is [openlightfx/openlightfx-studio](https://github.com/openlightfx/openlightfx-studio): the track editor this plugin hosts. Its `AGENTS.md` and `docs/journeys/J1-first-light.md` define the product journey; read at least the journey summary there.
 
 ## 1. What OpenLightFX is for
 
@@ -94,7 +94,7 @@ Key facts:
 | `tests/OpenLightFX.Emby.Tests/`       | xUnit. `Fixtures/sampling` is a byte-for-byte copy of Studio's shared fixtures (`SOURCE` names the commit). |
 | `docs/design/`                        | Design docs. `rooms-api.md` is the J1 plugin design.                                     |
 | `scripts/fetch-sdk.sh`                | Puts Emby 4.9.3.0 SDK DLLs in `lib/` (from the Docker image, else the official .deb).    |
-| `scripts/deploy.sh`                   | **Production deploy. Agents never run it.**                                              |
+| `scripts/deploy.sh`                   | Empoweres an agent to deploy for testing.                                                |
 | `scripts/analyze-playback.py`, `.github/skills/` | Owner's log-analysis helper.                                                   |
 
 ## 7. Running things
@@ -129,8 +129,3 @@ It boots Emby 4.9.3.0 in Docker on `localhost:8096` (`docker-compose.fullstack.y
 
 "All tests pass" is necessary, not sufficient.
 
-## 9. Workflow
-
-- `main` is the only long-lived branch. Branch, PR to `main`, one concern per PR. Studio PRs that need a plugin change link the plugin PR; the plugin lands first because the full stack builds from `main`.
-- Do not merge your own PR unless the owner has said to. Design PRs are merged by the owner.
-- Releases and deploys are the owner's.

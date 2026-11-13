@@ -32,6 +32,24 @@ public class StudioJsonNameTests
         Assert.DoesNotContain("PrimaryImageTag", json);
     }
 
+    [Fact(DisplayName = "LIB-001 @fixture item metadata includes recent date, track count, and active state")]
+    public void Library_metadata_uses_the_camel_case_contract()
+    {
+        var json = SsJson.SerializeToString(new StudioItemResponse
+        {
+            ItemId = "42",
+            DateAdded = "2025-01-02T03:04:05.0000000Z",
+            TrackCount = 2,
+            HasActiveTrack = true
+        });
+
+        using var document = JsonDocument.Parse(json);
+        var item = document.RootElement;
+        Assert.Equal("2025-01-02T03:04:05.0000000Z", item.GetProperty("dateAdded").GetString());
+        Assert.Equal(2, item.GetProperty("trackCount").GetInt32());
+        Assert.True(item.GetProperty("hasActiveTrack").GetBoolean());
+    }
+
     [Fact(DisplayName = "PLUG-006 @fixture settings JSON includes photosensitivityMode")]
     public void Settings_include_photosensitivity_mode()
     {

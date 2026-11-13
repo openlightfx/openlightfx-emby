@@ -73,6 +73,31 @@ public class StudioTrackFileTests
         }
     }
 
+    [Fact(DisplayName = "LIB-001 @fixture empty movie discovery is briefly cached and invalidated on save")]
+    public void Empty_discovery_cache_avoids_repeated_library_scans()
+    {
+        var root = Directory.CreateTempSubdirectory("olfx-discovery-cache-");
+        try
+        {
+            var movie = Path.Combine(root.FullName, "Movie.mkv");
+            File.WriteAllBytes(movie, new byte[] { 0 });
+            var discovery = new TrackDiscoveryService(new TrackParser(), new NullLogger());
+            Assert.Empty(discovery.DiscoverTracks(movie, null));
+
+            var trackPath = Path.Combine(root.FullName, "lightfx", "new-track.lightfx");
+            Directory.CreateDirectory(Path.GetDirectoryName(trackPath)!);
+            File.WriteAllBytes(trackPath, SampleTrack("New Track"));
+            Assert.Empty(discovery.DiscoverTracks(movie, null));
+
+            discovery.InvalidateCache(movie);
+            Assert.Single(discovery.DiscoverTracks(movie, null));
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
     [Fact]
     public void Lightfx_folder_wins_when_filenames_collide()
     {
