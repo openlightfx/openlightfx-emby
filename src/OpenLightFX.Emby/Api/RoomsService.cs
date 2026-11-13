@@ -5,10 +5,8 @@ using System.Runtime.Serialization;
 using MediaBrowser.Model.Services;
 using MediaBrowser.Controller.Net;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Controller.Security;
 using MediaBrowser.Controller.Devices;
 using MediaBrowser.Model.Devices;
-using OpenLightFX.Emby.Studio;
 using OpenLightFX.Emby.Discovery;
 using OpenLightFX.Emby.Models;
 using OpenLightFX.Emby.Rooms;
@@ -16,6 +14,9 @@ using OpenLightFX.Emby.Rooms;
 [Route("/OpenLightFX/Studio/Setup", "GET")]
 [Authenticated]
 public sealed class GetStudioSetup : IReturn<StudioSetupDto> { }
+[Route("/OpenLightFX/Studio/CanManageRooms", "GET")]
+[Authenticated(Roles = "Admin")]
+public sealed class GetStudioRoomAdminCapability : IReturn<StudioRoomAdminCapabilityDto> { }
 [Route("/OpenLightFX/Studio/Rooms", "GET")]
 [Authenticated]
 public sealed class GetStudioRooms : IReturn<List<StudioRoomDto>> { }
@@ -54,7 +55,11 @@ public sealed class IdentifyStudioBulb { public string BulbId { get; set; } = ""
 public sealed class StudioSetupDto
 {
     [DataMember(Name = "roomCount"), JsonPropertyName("roomCount")] public int RoomCount { get; set; }
-    [DataMember(Name = "isAdmin"), JsonPropertyName("isAdmin")] public bool IsAdmin { get; set; }
+}
+[DataContract]
+public sealed class StudioRoomAdminCapabilityDto
+{
+    [DataMember(Name = "canManageRooms"), JsonPropertyName("canManageRooms")] public bool CanManageRooms { get; set; }
 }
 [DataContract]
 public sealed class StudioRoomDto
@@ -112,26 +117,12 @@ public sealed class StudioDiscoveryDto
 
 public sealed class RoomsService : IService, IRequiresRequest
 {
-    private readonly IAuthenticationRepository _authentication;
-    private readonly IUserManager _users;
     private readonly IDeviceManager _deviceManager;
     public IRequest Request { get; set; } = null!;
 
-    public RoomsService(IAuthenticationRepository authentication, IUserManager users, IDeviceManager deviceManager)
+    public RoomsService(IDeviceManager deviceManager)
     {
-        _authentication = authentication;
-        _users = users;
         _deviceManager = deviceManager;
-    }
-
-    private bool IsAdmin()
-    {
-        var token = StudioStreamUrls.ReadAccessToken(Request);
-        if (string.IsNullOrEmpty(token)) return false;
-        var info = _authentication.Get(new AuthenticationInfoQuery { AccessToken = token, IsActive = true, Limit = 1 })
-            ?.Items?.FirstOrDefault(item => item.IsActive && string.Equals(item.AccessToken, token, StringComparison.Ordinal));
-        if (info == null || info.UserId == 0) return false;
-        return _users.GetUserById(info.UserId)?.Policy?.IsAdministrator == true;
     }
     private static ServerEntryPoint Entry => ServerEntryPoint.Instance ?? throw new InvalidOperationException("OpenLightFX is not ready.");
     private static Exception Error(RoomStoreException exception) => new ArgumentException($"{exception.Code}: {exception.Message}");
@@ -139,8 +130,11 @@ public sealed class RoomsService : IService, IRequiresRequest
     public object Get(GetStudioSetup request)
     {
         var entry = Entry;
-        return new StudioSetupDto { RoomCount = entry.RoomStore.Rooms.Count, IsAdmin = IsAdmin() };
+        return new StudioSetupDto { RoomCount = entry.RoomStore.Rooms.Count };
     }
+
+    public object Get(GetStudioRoomAdminCapability request) =>
+        new StudioRoomAdminCapabilityDto { CanManageRooms = true };
 
     public object Get(GetStudioRooms request) => Entry.RoomStore.Rooms.Select(MapRoom).ToList();
 
