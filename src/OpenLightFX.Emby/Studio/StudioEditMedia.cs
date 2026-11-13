@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Globalization;
 using System.Text.Json;
 
@@ -157,11 +158,18 @@ public static class StudioFramePlan
         return width;
     }
 
-    public static string Filter(bool hdr, string? colorTransfer, int maxWidth)
+    /// <param name="zscale">
+    /// Whether the ffmpeg build has the zimg zscale filter. Emby's bundled ffmpeg does not,
+    /// so HDR frames there go through Emby's supertonemap with the same hable curve.
+    /// </param>
+    public static string Filter(bool hdr, string? colorTransfer, int maxWidth, bool zscale = true)
     {
         var scale = $"scale='min({maxWidth},iw)':-2";
         if (!hdr)
             return $"format=rgb24,{scale}";
+
+        if (!zscale)
+            return "format=p010le,supertonemap=tonemap=hable:desat=0,format=rgb24," + scale;
 
         var tin = StudioFfprobe.IsHlg(colorTransfer) ? "arib-std-b67" : "smpte2084";
         return "zscale=tin=" + tin + ":t=linear:npl=100,format=gbrpf32le,zscale=p=bt709," +
@@ -170,7 +178,12 @@ public static class StudioFramePlan
 
     public static string ToneMap(bool hdr) => hdr ? HdrHeader : SdrHeader;
 
-    public static IReadOnlyList<string> Arguments(string inputPath, long timeMs, bool hdr, string? colorTransfer, int? maxWidth)
+    /// <summary>True when `ffmpeg -filters` output lists zscale.</summary>
+    public static bool HasZscale(string? filterList) =>
+        !string.IsNullOrEmpty(filterList) &&
+        filterList.Split('\n').Any(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries).ElementAtOrDefault(1) == "zscale");
+
+    public static IReadOnlyList<string> Arguments(string inputPath, long timeMs, bool hdr, string? colorTransfer, int? maxWidth, bool zscale = true)
     {
         var seconds = (timeMs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture);
         return new[]
@@ -180,7 +193,7 @@ public static class StudioFramePlan
             "-accurate_seek",
             "-i", inputPath,
             "-frames:v", "1",
-            "-vf", Filter(hdr, colorTransfer, ClampWidth(maxWidth)),
+            "-vf", Filter(hdr, colorTransfer, ClampWidth(maxWidth), zscale),
             "-f", "image2pipe",
             "-vcodec", "png",
             "pipe:1"
