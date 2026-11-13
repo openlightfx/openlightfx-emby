@@ -107,7 +107,7 @@ dotnet build src/OpenLightFX.Emby -c Release          # embeds the latest Studio
 dotnet test -c Release                                # xUnit (90+ tests)
 ```
 
-`fetch-sdk.sh` pulls from the `emby/embyserver:4.9.3.0` image (or the matching .deb). It does not contact the production server; do not point `EMBY_HOST` or anything else at `192.168.1.3`.
+`fetch-sdk.sh` pulls from the `emby/embyserver:4.9.3.0` image (or the matching .deb).
 
 **Full stack** lives in the Studio repo, because it tests both together:
 
@@ -134,14 +134,3 @@ It boots Emby 4.9.3.0 in Docker on `localhost:8096` (`docker-compose.fullstack.y
 - `main` is the only long-lived branch. Branch, PR to `main`, one concern per PR. Studio PRs that need a plugin change link the plugin PR; the plugin lands first because the full stack builds from `main`.
 - Do not merge your own PR unless the owner has said to. Design PRs are merged by the owner.
 - Releases and deploys are the owner's.
-
-## 10. Hard safety rules
-
-- **Never touch production.** Production Emby is `jonflix.proietti.family` / `192.168.1.3`. Never run `scripts/deploy.sh`, never `scp`/`ssh` to it, never call its API, never restart it. All testing uses the local Docker stack.
-- **Never print, log, commit, or paste a secret**: Emby API keys and tokens, Hue bridge keys, GitHub tokens, `?api_key=` URLs. Plugin logs must not include them either; log ids, not keys.
-- **No real bulbs.** Tests use the simulator. Do not run discovery or send commands on the owner's home network unless he asks.
-- **Never delete or rewrite a user's `.lightfx` files or plugin settings** in migration code. Import copies; it does not destroy the source.
-
-## 11. Working with the owner
-
-Johnathon (GitHub `Jonpro03`) owns both repos. Report what you verified, how, and what you did not. Unanswered design questions go in the PR as open questions, not into silent choices.
