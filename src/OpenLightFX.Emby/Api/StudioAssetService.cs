@@ -58,8 +58,12 @@ public class StudioAssetService : IService, IRequiresRequest
         if (redirect != null)
             return _results.GetRedirectResult(redirect);
 
-        var token = RequireToken();
-        RememberToken(token);
+        StudioSessionAuth.RequireToken(Request, StudioTicketScope.Assets, _authentication, _users);
+        StudioSessionAuth.Remember(Request, StudioTicketScope.Assets);
+        if (StudioAssetAuth.ReadCookie(Request?.Headers?["Cookie"], StudioAssetAuth.LegacyCookieName) != null)
+            Request?.Response?.AddHeader(
+                "Set-Cookie",
+                StudioAssetAuth.ClearCookieHeader(StudioAssetAuth.LegacyCookieName, StudioSessionAuth.IsSecure(Request)));
 
         var asset = _catalog.Resolve(request.RelativePath);
         if (asset == null)
@@ -76,54 +80,4 @@ public class StudioAssetService : IService, IRequiresRequest
         return _results.GetResult(Request, new ReadOnlyMemory<byte>(asset.Content), asset.ContentType, headers);
     }
 
-    private string RequireToken()
-    {
-        var token = StudioStreamUrls.ReadAccessToken(Request);
-        if (string.IsNullOrEmpty(token))
-            token = StudioAssetAuth.ReadCookie(Request?.Headers?["Cookie"], StudioAssetAuth.CookieName);
-        if (string.IsNullOrEmpty(token) || !IsActiveToken(token))
-            throw new SecurityException("Access token is invalid or expired.", SecurityExceptionType.Unauthenticated);
-        return token;
-    }
-
-    private bool IsActiveToken(string token)
-    {
-        try
-        {
-            var matches = _authentication.Get(new AuthenticationInfoQuery
-            {
-                AccessToken = token,
-                IsActive = true,
-                Limit = 1
-            });
-
-            var info = matches?.Items?.FirstOrDefault(item =>
-                item.IsActive && string.Equals(item.AccessToken, token, StringComparison.Ordinal));
-            if (info == null)
-                return false;
-            if (info.UserId == 0)
-                return true;
-
-            var user = _users.GetUserById(info.UserId);
-            return user?.Policy?.IsDisabled == false;
-        }
-        catch (SecurityException)
-        {
-            throw;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private void RememberToken(string token)
-    {
-        var response = Request?.Response;
-        if (response == null)
-            return;
-
-        var secure = Request?.IsSecureConnection == true;
-        response.AddHeader("Set-Cookie", StudioAssetAuth.SetCookieHeader(token, secure));
-    }
 }

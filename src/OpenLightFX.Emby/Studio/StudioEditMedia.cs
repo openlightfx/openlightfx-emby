@@ -340,12 +340,9 @@ public static class StudioProxyReadPlan
 
 public static class StudioEditUrls
 {
-    public static string ProxyMedia(string? absoluteUri, string itemId, string? apiKey)
+    public static string ProxyMedia(string? absoluteUri, string itemId)
     {
         var origin = StudioStreamUrls.FromAbsoluteUri(absoluteUri);
-        var url = $"{origin.Origin}{origin.PathBase}/OpenLightFX/Studio/Items/{Uri.EscapeDataString(itemId)}/Proxy/Media";
-        if (!string.IsNullOrEmpty(apiKey))
-            url += "?api_key=" + Uri.EscapeDataString(apiKey);
-        return url;
+        return $"{origin.Origin}{origin.PathBase}/OpenLightFX/Studio/Items/{Uri.EscapeDataString(itemId)}/Proxy/Media";
     }
 }

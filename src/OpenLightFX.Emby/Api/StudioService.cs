@@ -11,6 +11,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Net;
+using MediaBrowser.Controller.Security;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Services;
 using OpenLightFX.Emby.Configuration;
@@ -64,7 +65,7 @@ public class PostStudioProxy
 }
 
 [Route("/OpenLightFX/Studio/Items/{ItemId}/Proxy/Media", "GET", Description = "Direct-play the edit proxy")]
-[Authenticated]
+[Unauthenticated]
 public class GetStudioProxyMedia
 {
     public string ItemId { get; set; } = "";
@@ -189,7 +190,7 @@ public class StudioItemResponse
     [JsonPropertyName("primaryImageTag")]
     public string PrimaryImageTag { get; set; } = "";
 
-    /// <summary>Authenticated Emby image URL, or null when there is no Primary image.</summary>
+    /// <summary>Emby image URL, or null when there is no Primary image.</summary>
     [DataMember(Name = "posterUrl")]
     [JsonPropertyName("posterUrl")]
     public string? PosterUrl { get; set; }
@@ -331,6 +332,8 @@ public class StudioService : IService, IRequiresRequest
     private readonly IHttpResultFactory _results;
     private readonly IFfmpegManager _ffmpeg;
     private readonly IImageProcessor _images;
+    private readonly IAuthenticationRepository _authentication;
+    private readonly IUserManager _users;
     private readonly TrackParser _parser = new();
     private readonly ConfigurationService _config = new();
 
@@ -341,13 +344,17 @@ public class StudioService : IService, IRequiresRequest
         ILogManager logManager,
         IHttpResultFactory results,
         IFfmpegManager ffmpeg,
-        IImageProcessor images)
+        IImageProcessor images,
+        IAuthenticationRepository authentication,
+        IUserManager users)
     {
         _library = library;
         _logger = logManager.GetLogger("OpenLightFX.Studio");
         _results = results;
         _ffmpeg = ffmpeg;
         _images = images;
+        _authentication = authentication;
+        _users = users;
     }
 
     public async Task<object> Get(GetStudioBulbs request)
@@ -387,7 +394,6 @@ public class StudioService : IService, IRequiresRequest
             query.SearchTerm = request.Search.Trim();
 
         var items = _library.GetItemList(query);
-        var token = StudioStreamUrls.ReadAccessToken(Request);
         var requestUri = Request?.AbsoluteUri;
         return items
             .Where(item => !string.IsNullOrEmpty(item.Path))
@@ -404,7 +410,7 @@ public class StudioService : IService, IRequiresRequest
                         ? ticks / TimeSpan.TicksPerMillisecond
                         : 0,
                     PrimaryImageTag = tag,
-                    PosterUrl = StudioPosters.PosterUrl(requestUri, itemId, tag, token)
+                    PosterUrl = StudioPosters.PosterUrl(requestUri, itemId, tag)
                 };
             })
             .ToList();
@@ -455,6 +461,7 @@ public class StudioService : IService, IRequiresRequest
         var item = RequireItem(request.ItemId);
         var source = await ProbeAsync(item).ConfigureAwait(false);
         var job = EnsureProxy(item, source);
+        StudioSessionAuth.Remember(Request, StudioTicketScope.ProxyMedia);
         return ToMediaInfo(item, source, job);
     }
 
@@ -466,6 +473,7 @@ public class StudioService : IService, IRequiresRequest
         if (StudioProxyCache.TryGet(itemId, out var existing) && existing.State == "failed")
             StudioProxyCache.Forget(itemId);
         var job = EnsureProxy(item, source);
+        StudioSessionAuth.Remember(Request, StudioTicketScope.ProxyMedia);
         return ToProxy(job, EditUrl(itemId));
     }
 
@@ -506,6 +514,7 @@ public class StudioService : IService, IRequiresRequest
 
     public async Task<object> Get(GetStudioProxyMedia request)
     {
+        StudioSessionAuth.RequireToken(Request, StudioTicketScope.ProxyMedia, _authentication, _users);
         var item = RequireItem(request.ItemId);
         var source = await ProbeAsync(item).ConfigureAwait(false);
         var job = EnsureProxy(item, source);
@@ -934,7 +943,7 @@ public class StudioService : IService, IRequiresRequest
     };
 
     private string EditUrl(string itemId) =>
-        StudioEditUrls.ProxyMedia(Request?.AbsoluteUri, itemId, StudioStreamUrls.ReadAccessToken(Request));
+        StudioEditUrls.ProxyMedia(Request?.AbsoluteUri, itemId);
 
     private string? FfmpegPath() => _ffmpeg.FfmpegConfiguration?.EncoderPath;
 
