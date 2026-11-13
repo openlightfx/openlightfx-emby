@@ -20,13 +20,16 @@ public class StudioJsonNameTests
             ItemId = "42",
             Name = "Proxy Fixture",
             Year = 2020,
-            RuntimeMs = 101000
+            RuntimeMs = 101000,
+            PrimaryImageTag = "abc"
         });
 
         Assert.Contains("\"itemId\":\"42\"", json);
         Assert.Contains("\"runtimeMs\":101000", json);
+        Assert.Contains("\"primaryImageTag\":\"abc\"", json);
         Assert.DoesNotContain("ItemId", json);
         Assert.DoesNotContain("RuntimeMs", json);
+        Assert.DoesNotContain("PrimaryImageTag", json);
     }
 
     [Fact(DisplayName = "PLUG-006 @fixture settings JSON includes photosensitivityMode")]

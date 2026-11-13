@@ -179,6 +179,41 @@ public class StudioStreamUrlTests
     }
 
     [Fact]
+    public void Poster_url_uses_the_emby_image_route_and_the_page_token()
+    {
+        var url = StudioPosters.PosterUrl(
+            "http://host:8096/emby/OpenLightFX/Studio/Items?search=clip",
+            "9001",
+            "harbor tag",
+            "token value");
+
+        Assert.Equal(
+            "http://host:8096/emby/Items/9001/Images/Primary?tag=harbor%20tag&maxHeight=240&api_key=token%20value",
+            url);
+    }
+
+    [Fact]
+    public void Poster_url_uses_the_emby_prefix_when_the_items_call_is_at_the_root()
+    {
+        var url = StudioPosters.PosterUrl(
+            "http://host:8096/OpenLightFX/Studio/Items",
+            "9001",
+            "abc",
+            "test-admin");
+
+        Assert.StartsWith("http://host:8096/emby/Items/9001/Images/Primary?", url);
+        Assert.Contains("tag=abc", url);
+        Assert.Contains("api_key=test-admin", url);
+    }
+
+    [Fact]
+    public void Poster_url_is_absent_without_a_primary_tag()
+    {
+        Assert.Null(StudioPosters.PosterUrl("http://host:8096/emby/OpenLightFX/Studio/Items", "9001", "", "test-admin"));
+        Assert.Null(StudioPosters.PosterUrl("http://host:8096/emby/OpenLightFX/Studio/Items", "9001", null, "test-admin"));
+    }
+
+    [Fact]
     public void Reads_token_from_authorization_header()
     {
         var token = StudioStreamUrls.TokenFromAuthorization(
