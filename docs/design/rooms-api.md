@@ -2,7 +2,7 @@
 
 **Status:** draft for owner review. No code is written against this until it is approved.
 
-**Journey:** [Studio `docs/journeys/J1-first-light.md`](https://github.com/openlightfx/openlightfx-studio/blob/design/first-journey/docs/journeys/J1-first-light.md). That document owns the screens, the requirement IDs (ROOM-, MODEL-, EDIT-, WATCH-), the layouts, and the fold-down and fill tables. This document owns how the plugin stores rooms, which routes Studio calls, and how Emby playback finds the room and routes a track to its bulbs.
+**Journey:** [Studio `docs/journeys/J1-first-light.md`](https://github.com/openlightfx/openlightfx-studio/blob/main/docs/journeys/J1-first-light.md). That document owns the screens, the requirement IDs (ROOM-, MODEL-, EDIT-, WATCH-), the layouts, and the fold-down and fill tables. This document owns how the plugin stores rooms, which routes Studio calls, and how Emby playback finds the room and routes a track to its bulbs.
 
 ## Summary
 

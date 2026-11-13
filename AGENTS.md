@@ -113,7 +113,7 @@ dotnet test -c Release                                # xUnit (90+ tests)
 **Full stack** lives in the Studio repo, because it tests both together:
 
 ```bash
-cd ../openlightfx-studio            # on zeus: ~/git/openlightfx/studio-main
+cd ../openlightfx-studio            # a local clone of openlightfx-studio, on a developer machine with Docker
 OLFX_EMBY_BRANCH=<your branch> OLFX_FULLSTACK_REQUIRE=1 npm run test:fullstack
 ```
 
