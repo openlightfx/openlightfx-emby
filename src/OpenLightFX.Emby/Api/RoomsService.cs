@@ -114,7 +114,6 @@ public sealed class StudioDeviceDto
 public sealed class StudioDiscoveryDto
 {
     [DataMember(Name = "bulbs"), JsonPropertyName("bulbs")] public List<StudioBulbDto> Bulbs { get; set; } = new();
-    [DataMember(Name = "hueBridges"), JsonPropertyName("hueBridges")] public List<object> HueBridges { get; set; } = new();
     [DataMember(Name = "foundCount"), JsonPropertyName("foundCount")] public int FoundCount { get; set; }
 }
 
@@ -179,13 +178,8 @@ public sealed class RoomsService : IService, IRequiresRequest
     {
         var entry = Entry;
         var discovered = entry.DiscoveryCoordinator.DiscoverAsync().GetAwaiter().GetResult();
-        var hueBridges = discovered.Where(b => b.Protocol == BulbProtocol.Hue).Select(b => new
-        {
-            bridgeId = "hue:" + new string((b.MacAddress ?? b.IpAddress.ToString()).Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant(),
-            ip = b.IpAddress.ToString(),
-            paired = false
-        }).Cast<object>().ToList();
-        foreach (var bulb in discovered.Where(b => b.Protocol != BulbProtocol.Hue))
+        var supportedBulbs = discovered.Where(b => b.Protocol != BulbProtocol.Hue).ToList();
+        foreach (var bulb in supportedBulbs)
         {
             BulbConfig config = bulb.Protocol switch
             {
@@ -201,8 +195,7 @@ public sealed class RoomsService : IService, IRequiresRequest
         return new StudioDiscoveryDto
         {
             Bulbs = entry.RoomStore.Bulbs.Select(MapBulb).ToList(),
-            HueBridges = hueBridges,
-            FoundCount = discovered.Count
+            FoundCount = supportedBulbs.Count
         };
     }
 

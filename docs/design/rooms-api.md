@@ -15,22 +15,22 @@
 
 ## What exists today (main at `1ab2d76`)
 
-| Area                   | Code                                                                                    | Behavior that matters here                                                                                                                                                                                                                         |
-| ---------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bulb inventory         | `Rooms/RoomStore.cs`, `Models/BulbConfig.cs`                                               | Polymorphic protocol configuration is stored with known bulbs in `rooms.json`; it is not editable as pasted JSON. |
-| Channel → bulb mapping | `Rooms/RoomPlaybackMapping.cs`                                                            | A transient mapping is derived from room positions and track spatial hints; it is not persisted as a profile. |
-| Device → room          | `RoomStore`, `ServerEntryPoint.TryStartLightingSession`                                  | The Emby device id selects its room. No room means no lighting. |
-| Playback               | `ServerEntryPoint.TryStartLightingSession` → `PlaybackSession` → `ChannelManager`          | `ChannelManager` builds bulb → channels; the first channel listed wins per bulb (EMB-032). No mixing.                                                                                                                                              |
-| Auto-mapping           | `ChannelManager.SuggestMapping`                                                          | Compares `bulb.SpatialPosition` to `channel.SpatialHint` case-insensitively. Wizard data has "Left", tracks have "SPATIAL_LEFT", so it never matches. Unused by playback.                                                                          |
-| Discovery              | `Discovery/*`, `POST /OpenLightFX/Discover`                                               | WiZ, LIFX, Govee broadcast; Hue finds bridges, not lights. Results dedupe by MAC then IP+protocol and live in `DiscoveredBulbStore` for 30 minutes. **Each scan gives every bulb a new random GUID**, so ids are not stable.                        |
-| Identify               | `Discovery/IdentifyService.cs`, `POST /OpenLightFX/Identify/{BulbId}`                     | Looks the id up in `DiscoveredBulbStore` only, so it fails for configured bulbs and after 30 minutes. Hue identify is a 1.5 s no-op.                                                                                                              |
-| Hue pairing            | `Drivers/Hue/HueBridgePairing.cs`, `/OpenLightFX/Hue/Pair*`, `/OpenLightFX/Hue/Lights`     | Link-button pairing returns an API key; lights listed per bridge.                                                                                                                                                                                  |
-| Bulk save              | `POST /OpenLightFX/Discover/SaveConfig`                                                   | The openlightfx.com wizard's write path: replaces bulbs and profiles.                                                                                                                                                                              |
-| Devices                | `GET /OpenLightFX/Devices` (`TrackService.Get(GetDevices)`)                              | Lists **active sessions only**, so a TV that is off does not appear.                                                                                                                                                                               |
-| Track selection        | `Services/TrackSelectionService.cs`                                                      | `track-selections.json` in `{DataPath}/OpenLightFX`. Keys `itemId` (global) or `itemId:deviceId`. `TrackService` constructs its own second instance, so the two caches can disagree.                                                               |
-| Studio bulbs           | `GET /OpenLightFX/Studio/Bulbs`                                                          | Known bulbs from `RoomStore` with room assignment and capabilities. |
-| Studio preview         | `POST /OpenLightFX/Studio/Preview/{Start,Frame,Stop}`, `Studio/StudioPreviewHost.cs`       | Start takes a channel → bulbs `mapping` and **writes it into the active mapping profile** (`StudioService.RememberMapping`). Frame takes per-bulb states. Takeover refuses while Emby playback owns the bulbs (409 `playback_active`).            |
-| Tracks                 | `Studio/StudioTrackFiles.cs`, `PUT /OpenLightFX/Studio/Tracks/{TrackId}`                  | `{movieDir}/lightfx/{trackId}.lightfx`, validated with `TrackParser`, `If-Match` on `updatedAt`. Kept unchanged.                                                                                                                                   |
+| Area                   | Code                                                                                   | Behavior that matters here                                                                                                                                                                                                             |
+| ---------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bulb inventory         | `Rooms/RoomStore.cs`, `Models/BulbConfig.cs`                                           | Polymorphic protocol configuration is stored with known bulbs in `rooms.json`; it is not editable as pasted JSON.                                                                                                                      |
+| Channel → bulb mapping | `Rooms/RoomPlaybackMapping.cs`                                                         | A transient mapping is derived from room positions and track spatial hints; it is not persisted as a profile.                                                                                                                          |
+| Device → room          | `RoomStore`, `ServerEntryPoint.TryStartLightingSession`                                | The Emby device id selects its room. No room means no lighting.                                                                                                                                                                        |
+| Playback               | `ServerEntryPoint.TryStartLightingSession` → `PlaybackSession` → `ChannelManager`      | `ChannelManager` builds bulb → channels; the first channel listed wins per bulb (EMB-032). No mixing.                                                                                                                                  |
+| Auto-mapping           | `ChannelManager.SuggestMapping`                                                        | Compares `bulb.SpatialPosition` to `channel.SpatialHint` case-insensitively. Wizard data has "Left", tracks have "SPATIAL_LEFT", so it never matches. Unused by playback.                                                              |
+| Discovery              | `Discovery/*`, `POST /OpenLightFX/Discover`                                            | WiZ, LIFX, Govee broadcast; Hue finds bridges, not lights. Results dedupe by MAC then IP+protocol and live in `DiscoveredBulbStore` for 30 minutes. **Each scan gives every bulb a new random GUID**, so ids are not stable.           |
+| Identify               | `Discovery/IdentifyService.cs`, `POST /OpenLightFX/Identify/{BulbId}`                  | Looks the id up in `DiscoveredBulbStore` only, so it fails for configured bulbs and after 30 minutes. Hue identify is a 1.5 s no-op.                                                                                                   |
+| Hue pairing            | `Drivers/Hue/HueBridgePairing.cs`, `/OpenLightFX/Hue/Pair*`, `/OpenLightFX/Hue/Lights` | Link-button pairing returns an API key; lights listed per bridge.                                                                                                                                                                      |
+| Bulk save              | `POST /OpenLightFX/Discover/SaveConfig`                                                | The openlightfx.com wizard's write path: replaces bulbs and profiles.                                                                                                                                                                  |
+| Devices                | `GET /OpenLightFX/Devices` (`TrackService.Get(GetDevices)`)                            | Lists **active sessions only**, so a TV that is off does not appear.                                                                                                                                                                   |
+| Track selection        | `Services/TrackSelectionService.cs`                                                    | `track-selections.json` in `{DataPath}/OpenLightFX`. Keys `itemId` (global) or `itemId:deviceId`. `TrackService` constructs its own second instance, so the two caches can disagree.                                                   |
+| Studio bulbs           | `GET /OpenLightFX/Studio/Bulbs`                                                        | Known bulbs from `RoomStore` with room assignment and capabilities.                                                                                                                                                                    |
+| Studio preview         | `POST /OpenLightFX/Studio/Preview/{Start,Frame,Stop}`, `Studio/StudioPreviewHost.cs`   | Start takes a channel → bulbs `mapping` and **writes it into the active mapping profile** (`StudioService.RememberMapping`). Frame takes per-bulb states. Takeover refuses while Emby playback owns the bulbs (409 `playback_active`). |
+| Tracks                 | `Studio/StudioTrackFiles.cs`, `PUT /OpenLightFX/Studio/Tracks/{TrackId}`               | `{movieDir}/lightfx/{trackId}.lightfx`, validated with `TrackParser`, `If-Match` on `updatedAt`. Kept unchanged.                                                                                                                       |
 
 Kept as is: the edit proxy and MediaInfo, the Frame endpoint, track and sidecar save, the cookie tickets, `StudioPreviewHost`'s exclusivity with playback, the drivers, effects, `InterpolationEngine`, and `PhotosensitivityFilter`.
 
@@ -46,7 +46,11 @@ One file, `{IApplicationPaths.DataPath}/OpenLightFX/rooms.json`, next to `track-
     {
       "id": "r_6f2c1a",
       "name": "Living Room",
-      "screen": { "deviceId": "8b1e…", "deviceName": "Living Room TV", "appName": "Emby for Android TV" },
+      "screen": {
+        "deviceId": "8b1e…",
+        "deviceName": "Living Room TV",
+        "appName": "Emby for Android TV"
+      },
       "updatedAt": "2026-11-13T14:00:00.000Z"
     }
   ],
@@ -57,7 +61,13 @@ One file, `{IApplicationPaths.DataPath}/OpenLightFX/rooms.json`, next to `track-
       "roomId": "r_6f2c1a",
       "position": "left",
       "follows": null,
-      "config": { "protocol": "Wiz", "ipAddress": "192.168.1.40", "port": 38899, "macAddress": "A8:BB:50:C3:D2:01", "model": "ESP01_SHRGB1C_31" },
+      "config": {
+        "protocol": "Wiz",
+        "ipAddress": "192.168.1.40",
+        "port": 38899,
+        "macAddress": "A8:BB:50:C3:D2:01",
+        "model": "ESP01_SHRGB1C_31"
+      },
       "lastSeenAt": "2026-11-13T13:58:00.000Z"
     }
   ]
@@ -72,11 +82,11 @@ One file, `{IApplicationPaths.DataPath}/OpenLightFX/rooms.json`, next to `track-
 
 Ids must survive rescans and DHCP changes, so they come from hardware identity, not from the scan:
 
-| Protocol   | Id                                     | Notes                                                                                     |
-| ---------- | -------------------------------------- | ----------------------------------------------------------------------------------------- |
-| WiZ, LIFX, Govee | `{protocol}:{mac, lowercase, no separators}` | All three report a MAC in discovery.                                                     |
-| Hue        | `hue:{bridgeId}:{lightId}`             | `bridgeId` from the bridge's `/api/config`; `lightId` from `/lights`.                      |
-| No MAC     | `{protocol}:ip:{ip}`                   | Fallback; upgraded to the MAC form the first time a scan reports one.                     |
+| Protocol         | Id                                           | Notes                                                                 |
+| ---------------- | -------------------------------------------- | --------------------------------------------------------------------- |
+| WiZ, LIFX, Govee | `{protocol}:{mac, lowercase, no separators}` | All three report a MAC in discovery.                                  |
+| Hue              | `hue:{bridgeId}:{lightId}`                   | `bridgeId` from the bridge's `/api/config`; `lightId` from `/lights`. |
+| No MAC           | `{protocol}:ip:{ip}`                         | Fallback; upgraded to the MAC form the first time a scan reports one. |
 
 On every scan, a discovered bulb whose id matches a known bulb updates that bulb's `ipAddress` and `lastSeenAt` and keeps its name, room, and position.
 
@@ -96,13 +106,13 @@ Studio uses it to choose the first screen (FLOW-001) and enforce administrator-o
 
 ### Rooms
 
-| Route                                    | Body / result                                                                                                                                                                                                                                       |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /OpenLightFX/Studio/Rooms`          | `[{ id, name, screen, bulbs: [BulbDto], suggestedLayout: "LAYOUT_3_0", coveredPositions: ["left","center","right"], updatedAt }]`                                                                                                                       |
-| `GET /OpenLightFX/Studio/Rooms/{roomId}` | One room, same shape. 404 `room_not_found`.                                                                                                                                                                                                       |
-| `POST /OpenLightFX/Studio/Rooms`         | `{ name, screenDeviceId, bulbs: [{ id, position, follows }] }` → 201 with the room. 400 `name_required`, `name_taken`, `screen_required`, `unknown_bulb`.                                                                                             |
-| `PUT /OpenLightFX/Studio/Rooms/{roomId}` | Same body; replaces the room's name, screen, and bulb set. `If-Match: {updatedAt}` required → 412 `stale` if it differs. A bulb or screen used by another room → 409 `in_other_room` with `{ bulbIds, deviceIds, otherRoomId }` unless `moveFromOtherRooms: true`. |
-| `DELETE /OpenLightFX/Studio/Rooms/{roomId}` | 204. Its bulbs get `roomId: null`; its screen is free.                                                                                                                                                                                         |
+| Route                                       | Body / result                                                                                                                                                                                                                                                     |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /OpenLightFX/Studio/Rooms`             | `[{ id, name, screen, bulbs: [BulbDto], suggestedLayout: "LAYOUT_3_0", coveredPositions: ["left","center","right"], updatedAt }]`                                                                                                                                 |
+| `GET /OpenLightFX/Studio/Rooms/{roomId}`    | One room, same shape. 404 `room_not_found`.                                                                                                                                                                                                                       |
+| `POST /OpenLightFX/Studio/Rooms`            | `{ name, screenDeviceId, bulbs: [{ id, position, follows }] }` → 201 with the room. 400 `name_required`, `name_taken`, `screen_required`, `unknown_bulb`.                                                                                                         |
+| `PUT /OpenLightFX/Studio/Rooms/{roomId}`    | Same body; replaces the room's name, screen, and bulb set. `If-Match: {updatedAt}` required → 412 `stale` if it differs. A screen used by another room cannot be reassigned. A bulb used by another room → 409 `in_other_room` unless `moveFromOtherRooms: true`. |
+| `DELETE /OpenLightFX/Studio/Rooms/{roomId}` | 204. Its bulbs get `roomId: null`; its screen is free.                                                                                                                                                                                                            |
 
 `BulbDto` = `{ id, name, protocol, model, ipAddress, macAddress, roomId, position, follows, capabilities: { rgb, colorTemp, minTransitionMs }, lastSeenAt, reachable }`.
 
@@ -112,8 +122,15 @@ Studio uses it to choose the first screen (FLOW-001) and enforce administrator-o
 
 ```json
 [
-  { "deviceId": "8b1e…", "name": "Living Room TV", "appName": "Emby for Android TV", "lastUserName": "jon",
-    "lastActivity": "2026-11-13T13:10:00Z", "roomId": "r_6f2c1a", "unassignedPlayback": null }
+  {
+    "deviceId": "8b1e…",
+    "name": "Living Room TV",
+    "appName": "Emby for Android TV",
+    "lastUserName": "jon",
+    "lastActivity": "2026-11-13T13:10:00Z",
+    "roomId": "r_6f2c1a",
+    "unassignedPlayback": null
+  }
 ]
 ```
 
@@ -121,14 +138,13 @@ Source: Emby's `IDeviceManager.GetDevices(new DeviceQuery())` (present in the 4.
 
 ### Bulbs
 
-| Route                                               | Body / result                                                                                                                                                                                                                                     |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /OpenLightFX/Studio/Discover`                 | `{ timeoutMs?: 5000 }` → `{ bulbs: [BulbDto], hueBridges: [{ bridgeId, ip, paired }] }`. Runs `DiscoveryCoordinator`, assigns stable ids, merges with known bulbs (updating IP and `lastSeenAt`), and persists new bulbs as known-not-in-a-room so Identify and Rename work on them. One scan at a time: a second call while one runs → 409 `discovery_running`. |
-| `GET /OpenLightFX/Studio/Bulbs`                     | `[BulbDto]`: every known bulb. Replaces today's response of the same route (Studio is the only caller).                                                                                                                                         |
-| `PUT /OpenLightFX/Studio/Bulbs/{bulbId}`            | `{ name }` → BulbDto. Room and position change only through the room routes, so a room write is the single place membership changes.                                                                                                           |
-| `DELETE /OpenLightFX/Studio/Bulbs/{bulbId}`         | Forget a bulb that is in no room. 409 `in_room` otherwise.                                                                                                                                                                                       |
-| `POST /OpenLightFX/Studio/Bulbs/{bulbId}/Identify`  | → `{ durationMs: 1500 }` after the flash. Uses `BulbDriverFactory.Create(config)` on the known bulb, so it works for placed bulbs, after rescans, and for Hue lights (via the bridge with the stored key), then restores the previous state when the driver can read it. 409 `preview_active` or `playback_active` if the bulb is in use; 504 `no_answer` if the driver gets no response. |
-| `POST /OpenLightFX/Studio/Hue/Pair`                 | `{ bridgeId }` → `{ status: "paired" | "press_button" }`. Wraps `HueBridgePairing.RequestApiKey`; on success lists the bridge's lights and stores them as known bulbs with the key in `config`. Never returns the key.                           |
+| Route                                              | Body / result                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /OpenLightFX/Studio/Discover`                | `{ timeoutMs?: 5000 }` → `{ bulbs: [BulbDto] }`. Runs discovery for supported WiZ, LIFX, and Govee bulbs, assigns stable ids, merges with known bulbs (updating IP and `lastSeenAt`), and persists new bulbs as known-not-in-a-room so Identify and Rename work on them. One scan at a time: a second call while one runs → 409 `discovery_running`. |
+| `GET /OpenLightFX/Studio/Bulbs`                    | `[BulbDto]`: every known bulb. Replaces today's response of the same route (Studio is the only caller).                                                                                                                                                                                                                                              |
+| `PUT /OpenLightFX/Studio/Bulbs/{bulbId}`           | `{ name }` → BulbDto. Room and position change only through the room routes, so a room write is the single place membership changes.                                                                                                                                                                                                                 |
+| `DELETE /OpenLightFX/Studio/Bulbs/{bulbId}`        | Forget a bulb that is in no room. 409 `in_room` otherwise.                                                                                                                                                                                                                                                                                           |
+| `POST /OpenLightFX/Studio/Bulbs/{bulbId}/Identify` | → `{ durationMs: 1500 }` after the flash. Uses `BulbDriverFactory.Create(config)` on the known bulb, so it works for placed bulbs and after rescans, then restores the previous state when the driver can read it. 409 `preview_active` or `playback_active` if the bulb is in use; 504 `no_answer` if the driver gets no response.                  |
 
 ### Routing
 
@@ -138,11 +154,28 @@ Source: Emby's `IDeviceManager.GetDevices(new DeviceQuery())` (present in the 4.
 {
   "layout": "LAYOUT_5_0",
   "channels": [
-    { "channelId": "left", "position": "left", "bulbIds": ["wiz:a8…"], "foldedInto": null },
-    { "channelId": "surround-left", "position": "surround-left", "bulbIds": ["wiz:a8…"], "foldedInto": "left" }
+    {
+      "channelId": "left",
+      "position": "left",
+      "bulbIds": ["wiz:a8…"],
+      "foldedInto": null
+    },
+    {
+      "channelId": "surround-left",
+      "position": "surround-left",
+      "bulbIds": ["wiz:a8…"],
+      "foldedInto": "left"
+    }
   ],
   "bulbs": [
-    { "bulbId": "wiz:a8…", "sources": [ { "channelId": "left", "kind": "native" }, { "channelId": "center", "kind": "fold" }, { "channelId": "surround-left", "kind": "fold" } ] }
+    {
+      "bulbId": "wiz:a8…",
+      "sources": [
+        { "channelId": "left", "kind": "native" },
+        { "channelId": "center", "kind": "fold" },
+        { "channelId": "surround-left", "kind": "fold" }
+      ]
+    }
   ]
 }
 ```
@@ -151,11 +184,11 @@ Studio uses it only to label lanes (EDIT-004). Both playback and preview call `R
 
 ### Preview (changed)
 
-| Route                                       | Today                                       | Proposed                                                                                                                                                                    |
-| ------------------------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /OpenLightFX/Studio/Preview/Start`    | `{ mapping: {channel: [bulbIds]}, takeover }`, writes the mapping into the active profile | `{ roomId, channels: [{ id, spatialHint }], takeover }`. The plugin builds `RoomRouter` routing for that room and those channels, opens drivers for the room's bulbs. Nothing is written to settings; `RememberMapping` and `StudioMappingProfiles` are deleted. 409 `playback_active` unchanged; 400 `room_has_no_bulbs`. |
-| `POST /OpenLightFX/Studio/Preview/Frame`    | `{ states: [{ bulbId, r, g, b, brightness, transitionMs }] }` | `{ states: [{ channelId, r, g, b, brightness, transitionMs }] }`. The plugin mixes per bulb with the same `BulbMixer` playback uses.                                         |
-| `POST /OpenLightFX/Studio/Preview/Stop`     | Restores bulbs                              | Unchanged.                                                                                                                                                                  |
+| Route                                    | Today                                                                                     | Proposed                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /OpenLightFX/Studio/Preview/Start` | `{ mapping: {channel: [bulbIds]}, takeover }`, writes the mapping into the active profile | `{ roomId, channels: [{ id, spatialHint }], takeover }`. The plugin builds `RoomRouter` routing for that room and those channels, opens drivers for the room's bulbs. Nothing is written to settings; `RememberMapping` and `StudioMappingProfiles` are deleted. 409 `playback_active` unchanged; 400 `room_has_no_bulbs`. |
+| `POST /OpenLightFX/Studio/Preview/Frame` | `{ states: [{ bulbId, r, g, b, brightness, transitionMs }] }`                             | `{ states: [{ channelId, r, g, b, brightness, transitionMs }] }`. The plugin mixes per bulb with the same `BulbMixer` playback uses.                                                                                                                                                                                       |
+| `POST /OpenLightFX/Studio/Preview/Stop`  | Restores bulbs                                                                            | Unchanged.                                                                                                                                                                                                                                                                                                                 |
 
 ### Active track
 
@@ -181,23 +214,23 @@ Studio preview follows the same steps 3–6 with the room picked in Studio inste
 
 ### New and changed code
 
-| Code                                 | Kind     | Responsibility                                                                                         |
-| ------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------ |
-| `Rooms/RoomStore.cs`                 | new      | Load, validate, atomically save `rooms.json`; one shared instance.                                     |
-| `Rooms/Room.cs`, `Rooms/KnownBulb.cs`, `Rooms/Position.cs` | new | Room and bulb model. `Position.Parse` accepts supported position spellings. |
-| `Rooms/StableBulbId.cs`              | new      | Id rules above.                                                                                        |
-| `Rooms/TrackLayout.cs`               | new      | Layout constants, inference for existing tracks, V-012/V-013 helpers.                                  |
-| `Rooms/RoomRouter.cs`                | new      | Fold-down, fill, follows. Pure; tested against `tests/fixtures/routing/cases.json`.                    |
-| `Rooms/BulbMixer.cs`                 | new      | Mixing rule. Pure.                                                                                     |
-| `Api/RoomsService.cs`                | new      | The routes above.                                                                                      |
-| `Engine/ChannelManager.cs`, `Engine/PlaybackSession.cs` | changed | Consume room-derived channel-to-bulb mappings for playback.                                               |
-| `ServerEntryPoint.cs`                | changed  | Steps 1–6; shares `RoomStore` and one `TrackSelectionService`.                                         |
-| `Api/StudioService.cs`               | changed  | Preview start/frame bodies; ActiveTrack; Items counts; remove `RememberMapping`.                       |
-| `Services/TrackParser.cs`            | changed  | V-012, V-013 when `channel_layout` is set.                                                              |
-| `Proto/lightfx.proto`                | changed  | FP-2 field 14 and FP-3 comment. Copy kept identical to Studio's `proto/lightfx.proto`.                  |
-| `Configuration/PluginOptions.cs`     | changed  | Removes pasted bulb JSON, mapping profiles, active profile, and device overrides; retains playback settings. |
-| `Studio/StudioMappingProfiles.cs`, `ChannelManager.SuggestMapping` | removed | Superseded by `RoomRouter`.                                                        |
-| `POST /OpenLightFX/Discover/SaveConfig` | deprecated | Kept one release for the openlightfx.com wizard, then removed with that page.                     |
+| Code                                                               | Kind       | Responsibility                                                                                               |
+| ------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------ |
+| `Rooms/RoomStore.cs`                                               | new        | Load, validate, atomically save `rooms.json`; one shared instance.                                           |
+| `Rooms/Room.cs`, `Rooms/KnownBulb.cs`, `Rooms/Position.cs`         | new        | Room and bulb model. `Position.Parse` accepts supported position spellings.                                  |
+| `Rooms/StableBulbId.cs`                                            | new        | Id rules above.                                                                                              |
+| `Rooms/TrackLayout.cs`                                             | new        | Layout constants, inference for existing tracks, V-012/V-013 helpers.                                        |
+| `Rooms/RoomRouter.cs`                                              | new        | Fold-down, fill, follows. Pure; tested against `tests/fixtures/routing/cases.json`.                          |
+| `Rooms/BulbMixer.cs`                                               | new        | Mixing rule. Pure.                                                                                           |
+| `Api/RoomsService.cs`                                              | new        | The routes above.                                                                                            |
+| `Engine/ChannelManager.cs`, `Engine/PlaybackSession.cs`            | changed    | Consume room-derived channel-to-bulb mappings for playback.                                                  |
+| `ServerEntryPoint.cs`                                              | changed    | Steps 1–6; shares `RoomStore` and one `TrackSelectionService`.                                               |
+| `Api/StudioService.cs`                                             | changed    | Preview start/frame bodies; ActiveTrack; Items counts; remove `RememberMapping`.                             |
+| `Services/TrackParser.cs`                                          | changed    | V-012, V-013 when `channel_layout` is set.                                                                   |
+| `Proto/lightfx.proto`                                              | changed    | FP-2 field 14 and FP-3 comment. Copy kept identical to Studio's `proto/lightfx.proto`.                       |
+| `Configuration/PluginOptions.cs`                                   | changed    | Removes pasted bulb JSON, mapping profiles, active profile, and device overrides; retains playback settings. |
+| `Studio/StudioMappingProfiles.cs`, `ChannelManager.SuggestMapping` | removed    | Superseded by `RoomRouter`.                                                                                  |
+| `POST /OpenLightFX/Discover/SaveConfig`                            | deprecated | Kept one release for the openlightfx.com wizard, then removed with that page.                                |
 
 ## Plugin settings page
 
@@ -215,5 +248,5 @@ Wireframe: Studio `docs/journeys/wireframes/07-plugin-settings.png`.
 
 - `IDeviceManager.GetDevices` signature and fields in 4.9.3.0 (`DeviceQuery`, `DeviceInfo.LastUserName`, `AppName`, `DateLastActivity`): confirmed present as names in the SDK DLLs, not yet called.
 - Discovery from inside Docker needs host networking or the simulator on the compose network; the full-stack compose already places the simulator beside Emby.
-- Hue `bridgeId` and per-light identify need the simulator's Hue bridge to expose `/api/config` and `/lights`; check before writing ROOM-010's test.
+
 - Emby's generic options editor may escape HTML in `EditorDescription`; if it does, a small `IPluginConfigurationPage` with a static link replaces it.
