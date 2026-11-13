@@ -6,6 +6,7 @@ using System.Runtime.Serialization;
 using System.Text;
 using System.Text.Json.Serialization;
 using MediaBrowser.Common.Extensions;
+using MediaBrowser.Controller.Drawing;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
@@ -182,6 +183,16 @@ public class StudioItemResponse
     [DataMember(Name = "runtimeMs")]
     [JsonPropertyName("runtimeMs")]
     public long RuntimeMs { get; set; }
+
+    /// <summary>Emby cache tag for the Primary image. Empty when the movie has no poster.</summary>
+    [DataMember(Name = "primaryImageTag")]
+    [JsonPropertyName("primaryImageTag")]
+    public string PrimaryImageTag { get; set; } = "";
+
+    /// <summary>Authenticated Emby image URL, or null when there is no Primary image.</summary>
+    [DataMember(Name = "posterUrl")]
+    [JsonPropertyName("posterUrl")]
+    public string? PosterUrl { get; set; }
 }
 
 [DataContract]
@@ -319,17 +330,24 @@ public class StudioService : IService, IRequiresRequest
     private readonly ILogger _logger;
     private readonly IHttpResultFactory _results;
     private readonly IFfmpegManager _ffmpeg;
+    private readonly IImageProcessor _images;
     private readonly TrackParser _parser = new();
     private readonly ConfigurationService _config = new();
 
     public IRequest Request { get; set; } = null!;
 
-    public StudioService(ILibraryManager library, ILogManager logManager, IHttpResultFactory results, IFfmpegManager ffmpeg)
+    public StudioService(
+        ILibraryManager library,
+        ILogManager logManager,
+        IHttpResultFactory results,
+        IFfmpegManager ffmpeg,
+        IImageProcessor images)
     {
         _library = library;
         _logger = logManager.GetLogger("OpenLightFX.Studio");
         _results = results;
         _ffmpeg = ffmpeg;
+        _images = images;
     }
 
     public async Task<object> Get(GetStudioBulbs request)
@@ -369,18 +387,40 @@ public class StudioService : IService, IRequiresRequest
             query.SearchTerm = request.Search.Trim();
 
         var items = _library.GetItemList(query);
+        var token = StudioStreamUrls.ReadAccessToken(Request);
+        var requestUri = Request?.AbsoluteUri;
         return items
             .Where(item => !string.IsNullOrEmpty(item.Path))
-            .Select(item => new StudioItemResponse
+            .Select(item =>
             {
-                ItemId = PublicItemId(item),
-                Name = item.Name ?? "",
-                Year = item.ProductionYear ?? 0,
-                RuntimeMs = item.RunTimeTicks is long ticks
-                    ? ticks / TimeSpan.TicksPerMillisecond
-                    : 0
+                var itemId = PublicItemId(item);
+                var tag = PrimaryImageTag(item);
+                return new StudioItemResponse
+                {
+                    ItemId = itemId,
+                    Name = item.Name ?? "",
+                    Year = item.ProductionYear ?? 0,
+                    RuntimeMs = item.RunTimeTicks is long ticks
+                        ? ticks / TimeSpan.TicksPerMillisecond
+                        : 0,
+                    PrimaryImageTag = tag,
+                    PosterUrl = StudioPosters.PosterUrl(requestUri, itemId, tag, token)
+                };
             })
             .ToList();
+    }
+
+    private string PrimaryImageTag(BaseItem item)
+    {
+        try
+        {
+            return StudioPosters.PrimaryImageTag(_images, item);
+        }
+        catch (Exception ex)
+        {
+            _logger.ErrorException("Primary image tag failed for '{0}'", ex, item.Name);
+            return "";
+        }
     }
 
     public object Get(GetStudioStreamUrl request)
