@@ -842,11 +842,13 @@ public class StudioService : IService, IRequiresRequest
             var output = Path.Combine(directory, SafeFileToken(itemId) + ".mp4");
             var (width, height) = OutputSize(source.Width, source.Height);
             var job = new StudioProxyJob(itemId, output, source.Fps, width, height);
-            if (File.Exists(output) && new FileInfo(output).Length > 0)
+            if (StudioProxyJob.IsComplete(output))
             {
                 job.MarkReady(source.RuntimeMs);
                 return job;
             }
+            // A file without the completion marker is an encode that was interrupted.
+            StudioProxyJob.DiscardPartial(output);
 
             if (string.IsNullOrEmpty(item.Path))
             {

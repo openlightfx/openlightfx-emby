@@ -120,6 +120,7 @@ public class EditMediaTests
         Assert.Contains("open-gop=0", args);
         Assert.Contains("+cgop", args);
         Assert.Contains("frag_keyframe+empty_moov", args);
+        Assert.Contains("-flush_packets 1", args);
         Assert.DoesNotContain("-re", args, StringComparison.Ordinal);
         Assert.DoesNotContain("Transcode", args, StringComparison.OrdinalIgnoreCase);
     }
@@ -161,6 +162,26 @@ public class EditMediaTests
         Assert.Equal(9000, StudioProxyReadPlan.RangeStart("bytes=9000-"));
         Assert.Equal("edit proxy failed", StudioProxyReadPlan.PublicReason(null));
         Assert.DoesNotContain("api_key", StudioProxyReadPlan.PublicReason("ffmpeg exited and api_key=secret"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact(DisplayName = "MEDIA-016 @fixture a proxy cut short by a restart is not reused as finished")]
+    public void Interrupted_proxy_is_not_complete()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "olfx-partial-" + Guid.NewGuid().ToString("N") + ".mp4");
+        try
+        {
+            File.WriteAllBytes(path, new byte[] { 0, 0, 0, 28 });
+            Assert.False(StudioProxyJob.IsComplete(path));
+            File.WriteAllText(StudioProxyJob.CompleteMarker(path), "ok");
+            Assert.True(StudioProxyJob.IsComplete(path));
+            StudioProxyJob.DiscardPartial(path);
+            Assert.False(File.Exists(path));
+            Assert.False(File.Exists(StudioProxyJob.CompleteMarker(path)));
+        }
+        finally
+        {
+            StudioProxyJob.DiscardPartial(path);
+        }
     }
 
     [Fact(DisplayName = "ERR-001 @fixture a failed proxy keeps a reason and can be forgotten")]

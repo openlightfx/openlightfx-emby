@@ -136,6 +136,9 @@ public static class StudioProxyPlan
             "-ac", "2",
             "-b:a", "128k",
             "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+            // Without this ffmpeg holds finished fragments in its write buffer, and a
+            // growing-file reader sees only the 28-byte ftyp for many seconds.
+            "-flush_packets", "1",
             "-f", "mp4",
             "-progress", "pipe:2",
             "-nostats",
