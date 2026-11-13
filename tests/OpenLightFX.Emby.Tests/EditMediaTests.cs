@@ -86,6 +86,13 @@ public class EditMediaTests
         Assert.Equal(1280, StudioFramePlan.ClampWidth(null));
         Assert.Equal(1920, StudioFramePlan.ClampWidth(4000));
 
+        var emby = StudioFramePlan.Filter(true, "smpte2084", 1280, zscale: false);
+        Assert.DoesNotContain("zscale", emby);
+        Assert.Contains("supertonemap=tonemap=hable:desat=0", emby);
+        Assert.EndsWith("format=rgb24,scale='min(1280,iw)':-2", emby);
+        Assert.True(StudioFramePlan.HasZscale(" ... zscale            V->V       Apply resizing, colorspace and bit depth conversion.\n"));
+        Assert.False(StudioFramePlan.HasZscale(" .S. tonemap           V->V       Conversion to/from different dynamic ranges.\n"));
+
         var args = StudioFramePlan.Arguments("/movies/clip.mkv", 2500, true, "smpte2084", null);
         Assert.Contains("-accurate_seek", args);
         Assert.Contains("2.5", args);

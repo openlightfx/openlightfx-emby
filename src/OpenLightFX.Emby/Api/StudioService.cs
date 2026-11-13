@@ -448,7 +448,8 @@ public class StudioService : IService, IRequiresRequest
             throw new ArgumentException("timeMs is past the runtime");
 
         var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
-        var arguments = StudioFramePlan.Arguments(item.Path, timeMs, source.Hdr, source.ColorTransfer, request.MaxWidth);
+        var zscale = source.Hdr && await HasZscaleAsync(ffmpeg).ConfigureAwait(false);
+        var arguments = StudioFramePlan.Arguments(item.Path, timeMs, source.Hdr, source.ColorTransfer, request.MaxWidth, zscale);
         var (code, png, log) = await StudioProcess.RunAsync(ffmpeg, arguments, CancellationToken.None).ConfigureAwait(false);
         if (code != 0 || png.Length < 8 || png[0] != 0x89)
             throw new ServiceUnavailableException("Frame extraction failed");
@@ -481,12 +482,7 @@ public class StudioService : IService, IRequiresRequest
             {
                 ["Accept-Ranges"] = "bytes"
             });
-            if (denied is IHttpResult unavailable)
-            {
-                unavailable.StatusCode = HttpStatusCode.RequestedRangeNotSatisfiable;
-                unavailable.Status = 416;
-            }
-            return denied;
+            return WithStatus(denied, HttpStatusCode.RequestedRangeNotSatisfiable);
         }
 
         var count = length == 0 ? 0 : (int)(slice.End - slice.Start + 1);
@@ -516,11 +512,22 @@ public class StudioService : IService, IRequiresRequest
             headers["Content-Range"] = $"bytes {slice.Start}-{slice.Start + bytes.Length - 1}/{length}";
 
         var result = _results.GetResult(Request, new ReadOnlyMemory<byte>(bytes), "video/mp4", headers);
-        if (slice.Status == 206 && result is IHttpResult partial)
+        return slice.Status == 206 ? WithStatus(result, HttpStatusCode.PartialContent) : result;
+    }
+
+    /// <summary>
+    /// GetResult over a byte buffer is not an IHttpResult, so setting the status on it
+    /// was skipped and ranged reads went out as 200. Set it on the response as well.
+    /// </summary>
+    private object WithStatus(object result, HttpStatusCode status)
+    {
+        if (result is IHttpResult http)
         {
-            partial.StatusCode = HttpStatusCode.PartialContent;
-            partial.Status = 206;
+            http.StatusCode = status;
+            http.Status = (int)status;
         }
+        if (Request?.Response != null)
+            Request.Response.StatusCode = (int)status;
         return result;
     }
 
@@ -857,14 +864,29 @@ public class StudioService : IService, IRequiresRequest
 
     private string? FfprobePath()
     {
-        var detect = _ffmpeg.FfmpegConfiguration?.DetectPath;
-        if (!string.IsNullOrEmpty(detect) && File.Exists(detect))
-            return detect;
+        // DetectPath is Emby's ffdetect, not ffprobe; running it with ffprobe arguments
+        // fails and every probe silently fell back to Emby's item fields.
+        var probe = _ffmpeg.FfmpegConfiguration?.ProbePath;
+        if (!string.IsNullOrEmpty(probe) && File.Exists(probe))
+            return probe;
         var ffmpeg = FfmpegPath();
         if (string.IsNullOrEmpty(ffmpeg))
-            return detect;
+            return probe;
         var sibling = Path.Combine(Path.GetDirectoryName(ffmpeg) ?? "", "ffprobe");
-        return File.Exists(sibling) ? sibling : detect;
+        return File.Exists(sibling) ? sibling : probe;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> ZscaleByFfmpeg = new();
+
+    private static async Task<bool> HasZscaleAsync(string ffmpeg)
+    {
+        if (ZscaleByFfmpeg.TryGetValue(ffmpeg, out var known))
+            return known;
+        var (code, stdout, _) = await StudioProcess.RunAsync(
+            ffmpeg, new[] { "-hide_banner", "-filters" }, CancellationToken.None).ConfigureAwait(false);
+        var has = code == 0 && StudioFramePlan.HasZscale(Encoding.UTF8.GetString(stdout));
+        ZscaleByFfmpeg[ffmpeg] = has;
+        return has;
     }
 
     private static string RequireTool(string? path, string name)
@@ -882,9 +904,15 @@ public class StudioService : IService, IRequiresRequest
         {
             length = File.Exists(job.OutputPath) ? new FileInfo(job.OutputPath).Length : 0;
             var slice = StudioByteRange.Resolve(range, length);
-            if (slice.Status == 416)
+            // A malformed range never becomes satisfiable. Otherwise a 416 only means the
+            // encode has not reached the start yet (length is 0 before ffmpeg creates the
+            // file), so keep waiting while the job is still building.
+            if (StudioByteRange.Resolve(range, long.MaxValue).Status == 416)
                 return length;
-            if (length > slice.End)
+            var building = job.State == "building" || job.State == "missing";
+            if (slice.Status != 416 && length > slice.End)
+                return length;
+            if (slice.Status == 416 && !building)
                 return length;
             if (DateTime.UtcNow >= deadline)
                 return length;
