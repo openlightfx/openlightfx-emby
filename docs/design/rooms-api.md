@@ -94,6 +94,12 @@ On every scan, a discovered bulb whose id matches a known bulb updates that bulb
 
 All under `/emby`. Reads use `[Authenticated]`; writes use `[Authenticated(Roles = "Admin")]`, like the existing Studio routes. JSON is camelCase through `[DataMember(Name=…)]`, matching `StudioService`. Errors are `{ "error": "code", "message": "human text" }` with the status shown.
 
+The static Studio SPA is public because it contains no user data. It obtains the active Emby Web credential from same-origin `servercredentials3` storage and sends it to `GET /OpenLightFX/Studio/Session`; the plugin validates the token (or redeems a valid `olfx_studio_page` ticket) and returns it with `Cache-Control: no-store`. The SPA holds the token only in memory and sends it as `X-Emby-Token` to protected API routes. This avoids requiring users to add an API key to the Studio URL. Writes remain admin-only.
+
+### Session bootstrap
+
+`GET /OpenLightFX/Studio/Session` → `{ accessToken }`. It accepts an explicit Emby token or a valid, HttpOnly `olfx_studio_page` ticket. The ticket is short-lived and scoped; the response is not cacheable. Invalid or expired credentials return 401.
+
 ### Setup
 
 `GET /OpenLightFX/Studio/Setup` →

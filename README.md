@@ -99,6 +99,7 @@ The plugin discovers `.lightfx` files using:
 | `/OpenLightFX/Tracks/Select` | POST | Set/clear the selected track |
 | `/OpenLightFX/Status` | GET | Current playback status |
 | `/OpenLightFX/Bulbs/Test?bulbId={id}` | GET | Test bulb connectivity |
+| `/OpenLightFX/Studio/Session` | GET | Validate the Emby Web credential or scoped page ticket for Studio API calls |
 | `/OpenLightFX/Studio/Bulbs` | GET | Configured bulbs and capability profiles |
 | `/OpenLightFX/Studio/Items?search=` | GET | Search library movies |
 | `/OpenLightFX/Studio/Items/{itemId}/StreamUrl` | GET | Browser-playable video URL |
@@ -108,7 +109,7 @@ The plugin discovers `.lightfx` files using:
 | `/OpenLightFX/Studio/Preview/Frame` | POST | Send a preview frame (admin) |
 | `/OpenLightFX/Studio/Preview/Stop` | POST | Stop preview and restore bulbs (admin) |
 
-Studio's static editor is served at `/emby/OpenLightFX/studio/` (Emby also exposes the same route at `/OpenLightFX/studio/`). The dist should use relative asset URLs, or base `/emby/OpenLightFX/studio/`. The first request must carry an Emby access token (`?api_key=` or `X-Emby-Token`); the plugin sets the `olfx_studio_page` cookie so the SPA's scripts and styles load. API calls use `X-Emby-Token`. Saving tracks and preview require an administrator. A `<video>` element cannot send that header, so `MediaInfo` and `POST .../Proxy` set the `olfx_studio_media` cookie and `editUrl` does not include `api_key`. Neither cookie holds the access token: each holds a random in-memory ticket that is HttpOnly, `SameSite=Strict`, `Secure` over HTTPS (including `X-Forwarded-Proto: https`), expires after 8 hours, rotates after 4, and dies with an Emby restart or when the token behind it is revoked. A ticket is honoured only for GET of its own route (Studio page files, or the edit proxy), never for another endpoint or a write. `StreamUrl` still appends the token because that URL is Emby's own video endpoint.
+Studio's static editor is served at `/emby/OpenLightFX/studio/` (Emby also exposes the same route at `/OpenLightFX/studio/`). The dist should use relative asset URLs, or base `/emby/OpenLightFX/studio/`. The static shell and assets contain no user data and do not require a token. Studio reads Emby Web's same-origin `servercredentials3` credential and calls `GET /OpenLightFX/Studio/Session` with `X-Emby-Token`; the plugin validates it and returns the token with `Cache-Control: no-store` for in-memory use. The session endpoint can instead redeem the short-lived `olfx_studio_page` HttpOnly ticket when present. Users do not need an API key in the URL; `?api_key=` remains supported for direct/legacy access. Studio API calls use `X-Emby-Token`. Saving tracks and preview require an administrator. A `<video>` element cannot send that header, so `MediaInfo` and `POST .../Proxy` set the separate `olfx_studio_media` cookie and `editUrl` does not include `api_key`. Cookie tickets are random, in-memory, HttpOnly, `SameSite=Strict`, `Secure` over HTTPS (including `X-Forwarded-Proto: https`), expire after 8 hours, rotate after 4, and die with an Emby restart or when the token behind them is revoked. `StreamUrl` still appends the token because that URL is Emby's own video endpoint.
 
 ## Architecture
 

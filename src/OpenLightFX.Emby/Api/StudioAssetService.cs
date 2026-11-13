@@ -17,9 +17,9 @@ public class GetStudioAsset : IReturnVoid
 }
 
 /// <summary>
-/// Serves the embedded Studio single-page app. Unknown extensionless paths return index.html.
-/// Marked unauthenticated so this method can accept the studio cookie; every response still
-/// requires a live Emby access token.
+/// Serves the embedded Studio single-page app. The static application shell contains no user data
+/// and is public; Studio's API routes still require a live Emby token. When an authenticated
+/// request does provide a token, a scoped page ticket lets Studio bootstrap its API session.
 /// </summary>
 public class StudioAssetService : IService, IRequiresRequest
 {
@@ -58,8 +58,9 @@ public class StudioAssetService : IService, IRequiresRequest
         if (redirect != null)
             return _results.GetRedirectResult(redirect);
 
-        StudioSessionAuth.RequireToken(Request, StudioTicketScope.Assets, _authentication, _users);
-        StudioSessionAuth.Remember(Request, StudioTicketScope.Assets);
+        var accessToken = StudioStreamUrls.ReadAccessToken(Request);
+        if (!string.IsNullOrEmpty(accessToken) && StudioSessionAuth.IsActive(accessToken, _authentication, _users))
+            StudioSessionAuth.Remember(Request, StudioTicketScope.Assets);
         if (StudioAssetAuth.ReadCookie(Request?.Headers?["Cookie"], StudioAssetAuth.LegacyCookieName) != null)
             Request?.Response?.AddHeader(
                 "Set-Cookie",

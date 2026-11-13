@@ -21,6 +21,10 @@ using OpenLightFX.Emby.Studio;
 
 // ─── Requests ──────────────────────────────────────────────────────────
 
+[Route("/OpenLightFX/Studio/Session", "GET", Description = "Exchange the Studio page ticket for its Emby API session")]
+[Unauthenticated]
+public class GetStudioSession : IReturn<StudioSessionResponse> { }
+
 [Route("/OpenLightFX/Studio/Bulbs", "GET", Description = "Configured bulbs and capability profiles for Studio")]
 [Authenticated]
 public class GetStudioBulbs : IReturn<List<StudioBulbResponse>>
@@ -135,6 +139,14 @@ public class StopStudioPreview : IReturn<StudioPreviewResponse>
 }
 
 // ─── Responses ─────────────────────────────────────────────────────────
+
+[DataContract]
+public class StudioSessionResponse
+{
+    [DataMember(Name = "accessToken")]
+    [JsonPropertyName("accessToken")]
+    public string AccessToken { get; set; } = "";
+}
 
 [DataContract]
 public class StudioBulbResponse
@@ -388,6 +400,14 @@ public class StudioService : IService, IRequiresRequest
         _images = images;
         _authentication = authentication;
         _users = users;
+    }
+
+    public object Get(GetStudioSession request)
+    {
+        var token = StudioSessionAuth.RequireToken(
+            Request, StudioTicketScope.Assets, _authentication, _users);
+        Request?.Response?.AddHeader("Cache-Control", "no-store");
+        return new StudioSessionResponse { AccessToken = token };
     }
 
     public async Task<object> Get(GetStudioBulbs request)
