@@ -29,7 +29,7 @@ public class GoveeDriver : IBulbDriver
     {
         _config = config;
 
-        _endpoint = new IPEndPoint(config.IpAddress, GoveeControlPort);
+        _endpoint = new IPEndPoint(config.IpAddress, config.Port > 0 ? config.Port : GoveeControlPort);
 
         _udpClient = new UdpClient();
         _udpClient.Client.ReceiveTimeout = ResponseTimeoutMs;
@@ -48,6 +48,12 @@ public class GoveeDriver : IBulbDriver
 
     public async Task SetState(byte r, byte g, byte b, uint brightness, uint transitionMs)
     {
+        if (brightness > 0 && _lastKnownState?.IsOn != true)
+        {
+            // LAN turn commands do not promise acknowledgements. Keep the playback
+            // path fire-and-forget rather than blocking color delivery on retries.
+            await SendFireAndForget(BuildCommand("turn", new JsonObject { ["value"] = 1 }));
+        }
         var colorPayload = BuildCommand("colorwc", new JsonObject
         {
             ["color"] = new JsonObject { ["r"] = r, ["g"] = g, ["b"] = b },
@@ -55,7 +61,7 @@ public class GoveeDriver : IBulbDriver
         });
         await SendFireAndForget(colorPayload);
 
-        if (brightness != (_lastKnownState?.Brightness ?? 100))
+        if (_lastKnownState == null || brightness != _lastKnownState.Brightness)
         {
             var brightnessPayload = BuildCommand("brightness", new JsonObject
             {
@@ -64,7 +70,8 @@ public class GoveeDriver : IBulbDriver
             await SendFireAndForget(brightnessPayload);
         }
 
-        _lastKnownState = new BulbState(r, g, b, brightness, null, true);
+        _lastKnownState = new BulbState(r, g, b, brightness, null,
+            brightness > 0 || (_lastKnownState?.IsOn ?? false));
     }
 
     public async Task SetColor(byte r, byte g, byte b, uint transitionMs = 0)

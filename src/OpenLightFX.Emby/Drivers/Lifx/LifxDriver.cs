@@ -14,7 +14,7 @@ public class LifxDriver : IBulbDriver
     private const int LifxDefaultPort = 56700;
     private const int FrameHeaderSize = 8;
     private const int FrameAddressSize = 16;
-    private const int ProtocolHeaderSize = 4;
+    private const int ProtocolHeaderSize = 12;
     private const int HeaderTotalSize = FrameHeaderSize + FrameAddressSize + ProtocolHeaderSize;
 
     private const ushort MsgTypeSetColor = 102;
@@ -67,10 +67,13 @@ public class LifxDriver : IBulbDriver
 
     public async Task SetState(byte r, byte g, byte b, uint brightness, uint transitionMs)
     {
+        if (brightness > 0 && _lastKnownState?.IsOn != true)
+            await SetPower(true);
         var scaledRgb = ScaleRgbByBrightness(r, g, b, brightness);
         var (hue, sat, bri, kelvin) = ColorConverter.RgbToHsbk(scaledRgb.r, scaledRgb.g, scaledRgb.b, DefaultKelvin);
         await SendSetColor(hue, sat, bri, kelvin, transitionMs);
-        _lastKnownState = new BulbState(r, g, b, brightness, null, true);
+        _lastKnownState = new BulbState(r, g, b, brightness, null,
+            brightness > 0 || (_lastKnownState?.IsOn ?? false));
     }
 
     public async Task SetColor(byte r, byte g, byte b, uint transitionMs = 0)
@@ -161,10 +164,14 @@ public class LifxDriver : IBulbDriver
                     ushort bri = BitConverter.ToUInt16(result.Buffer, HeaderTotalSize + 4);
                     ushort kelvin = BitConverter.ToUInt16(result.Buffer, HeaderTotalSize + 6);
 
-                    var (r, g, b) = ColorConverter.HsbkToRgb(hue, sat, bri);
+                    // Keep chroma and intensity separate; otherwise restoration dims twice.
+                    var (r, g, b) = bri == 0 ? ((byte)0, (byte)0, (byte)0)
+                        : ColorConverter.HsbkToRgb(hue, sat, ushort.MaxValue);
                     uint brightness = (uint)Math.Clamp(Math.Round(bri / 65535.0 * 100.0), 0, 100);
+                    var isOn = result.Buffer.Length >= HeaderTotalSize + 12
+                        && BitConverter.ToUInt16(result.Buffer, HeaderTotalSize + 10) > 0;
 
-                    _lastKnownState = new BulbState(r, g, b, brightness, kelvin, true);
+                    _lastKnownState = new BulbState(r, g, b, brightness, kelvin, isOn);
                     return _lastKnownState;
                 }
             }
@@ -234,17 +241,9 @@ public class LifxDriver : IBulbDriver
         // sequence (1 byte at offset 23)
         packet[23] = _sequence++;
 
-        // --- Protocol header (4 bytes) ---
-        // reserved (1 byte at offset 24) - already zeroed
-        // type (16-bit LE at offset 25..26)
-        // NOTE: the protocol header is actually at offset 24, laid out as:
-        //   reserved(8) + type(16) + reserved(8) = bytes 24,25-26,27
-        // But per LIFX spec the header is packed as: 64-bit reserved(0) ignored,
-        // actually: offset 24 = reserved(8), offset 25-26 = type(16), offset 27 = reserved(8)
-        // Let's correct: total header = 8 + 16 + 4 = 28 bytes
-        packet[24] = 0; // reserved
-        BitConverter.TryWriteBytes(packet.AsSpan(25), messageType);
-        packet[27] = 0; // reserved
+        // Protocol header: reserved u64 at 24, type u16 at 32, reserved u16 at 34.
+        // Payload begins after the standard 36-byte LAN header.
+        BitConverter.TryWriteBytes(packet.AsSpan(32), messageType);
 
         // --- Payload ---
         if (payload.Length > 0)

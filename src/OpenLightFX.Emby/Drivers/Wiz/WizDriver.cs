@@ -50,6 +50,8 @@ public class WizDriver : IBulbDriver
 
     public async Task SetState(byte r, byte g, byte b, uint brightness, uint transitionMs)
     {
+        // WiZ's minimum dimming is nonzero: an empty channel must not turn it on.
+        var powered = brightness > 0;
         var dimming = MapBrightness(brightness);
         var payload = new JsonObject
         {
@@ -60,12 +62,12 @@ public class WizDriver : IBulbDriver
                 ["g"] = g,
                 ["b"] = b,
                 ["dimming"] = dimming,
-                ["state"] = true
+                ["state"] = powered
             }
         };
 
         await SendFireAndForget(payload);
-        _lastKnownState = new BulbState(r, g, b, brightness, null, true);
+        _lastKnownState = new BulbState(r, g, b, brightness, null, powered);
     }
 
     public async Task SetColor(byte r, byte g, byte b, uint transitionMs = 0)
