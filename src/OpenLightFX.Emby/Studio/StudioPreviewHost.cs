@@ -14,6 +14,7 @@ public sealed class StudioPreviewHost : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _pump;
     private StudioPreviewSession? _session;
+    private Dictionary<string, List<string>> _channelToBulbs = new(StringComparer.Ordinal);
     private int _disposed;
 
     public StudioPreviewHost(bool startPump = true)
@@ -62,7 +63,13 @@ public sealed class StudioPreviewHost : IAsyncDisposable
             var session = await StudioPreviewSession.CreateAsync(
                 mapping, bulbs, photosensitivity, createDriver, now).ConfigureAwait(false);
             lock (_sessionLock)
+            {
                 _session = session;
+                _channelToBulbs = mapping.ToDictionary(
+                    entry => entry.Key,
+                    entry => entry.Value.Distinct(StringComparer.Ordinal).ToList(),
+                    StringComparer.Ordinal);
+            }
             return true;
         }
         finally
@@ -77,6 +84,48 @@ public sealed class StudioPreviewHost : IAsyncDisposable
         if (session == null)
             throw new StudioPreviewNotActiveException();
         await session.SubmitFrameAsync(samples, now).ConfigureAwait(false);
+    }
+
+    public async Task SubmitChannelFrameAsync(IReadOnlyList<StudioPreviewChannelSample> samples, DateTimeOffset now)
+    {
+        var session = CurrentSession();
+        if (session == null)
+            throw new StudioPreviewNotActiveException();
+
+        Dictionary<string, List<StudioPreviewChannelSample>> byBulb = new(StringComparer.Ordinal);
+        Dictionary<string, List<string>> mapping;
+        lock (_sessionLock)
+            mapping = _channelToBulbs.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        foreach (var sample in samples)
+        {
+            if (!mapping.TryGetValue(sample.ChannelId, out var bulbIds)) continue;
+            foreach (var bulbId in bulbIds)
+            {
+                if (!byBulb.TryGetValue(bulbId, out var list)) byBulb[bulbId] = list = new();
+                list.Add(sample);
+            }
+        }
+
+        var bulbSamples = byBulb.Select(pair =>
+        {
+            var sources = pair.Value.Select(sample => new OpenLightFX.Emby.Engine.InterpolationEngine.InterpolatedState(
+                (byte)Math.Clamp(sample.R, 0, 255),
+                (byte)Math.Clamp(sample.G, 0, 255),
+                (byte)Math.Clamp(sample.B, 0, 255),
+                (uint)Math.Clamp(sample.Brightness, 0, 100),
+                0,
+                Openlightfx.ColorMode.Rgb,
+                sample.Brightness > 0));
+            var mixed = OpenLightFX.Emby.Rooms.BulbMixer.Mix(sources.ToArray());
+            return new StudioPreviewSample(
+                pair.Key,
+                mixed.R,
+                mixed.G,
+                mixed.B,
+                (int)mixed.Brightness,
+                pair.Value.Max(sample => Math.Max(sample.TransitionMs, 0)));
+        }).ToArray();
+        await session.SubmitFrameAsync(bulbSamples, now).ConfigureAwait(false);
     }
 
     public async Task StopAsync()
@@ -100,6 +149,7 @@ public sealed class StudioPreviewHost : IAsyncDisposable
         {
             session = _session;
             _session = null;
+            _channelToBulbs.Clear();
         }
 
         return session?.StopAsync() ?? Task.CompletedTask;

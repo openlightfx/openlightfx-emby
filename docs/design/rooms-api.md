@@ -1,6 +1,6 @@
 # Rooms API — design
 
-**Status:** draft for owner review. No code is written against this until it is approved.
+**Status:** approved by the owner; implementation is in progress with J1 Step 4.
 
 **Journey:** [Studio `docs/journeys/J1-first-light.md`](https://github.com/openlightfx/openlightfx-studio/blob/main/docs/journeys/J1-first-light.md). That document owns the screens, the requirement IDs (ROOM-, MODEL-, EDIT-, WATCH-), the layouts, and the fold-down and fill tables. This document owns how the plugin stores rooms, which routes Studio calls, and how Emby playback finds the room and routes a track to its bulbs.
 
@@ -112,13 +112,13 @@ Studio uses it to choose the first screen (FLOW-001) and enforce administrator-o
 
 ### Rooms
 
-| Route                                       | Body / result                                                                                                                                                                                                                                                     |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /OpenLightFX/Studio/Rooms`             | `[{ id, name, screen, bulbs: [BulbDto], suggestedLayout: "LAYOUT_3_0", coveredPositions: ["left","center","right"], updatedAt }]`                                                                                                                                 |
-| `GET /OpenLightFX/Studio/Rooms/{roomId}`    | One room, same shape. 404 `room_not_found`.                                                                                                                                                                                                                       |
-| `POST /OpenLightFX/Studio/Rooms`            | `{ name, screenDeviceId, bulbs: [{ id, position, follows }] }` → 201 with the room. 400 `name_required`, `name_taken`, `screen_required`, `unknown_bulb`.                                                                                                         |
-| `PUT /OpenLightFX/Studio/Rooms/{roomId}`    | Same body; replaces the room's name, screen, and bulb set. `If-Match: {updatedAt}` required → 412 `stale` if it differs. A screen used by another room cannot be reassigned. A bulb used by another room → 409 `in_other_room` unless `moveFromOtherRooms: true`. |
-| `DELETE /OpenLightFX/Studio/Rooms/{roomId}` | 204. Its bulbs get `roomId: null`; its screen is free.                                                                                                                                                                                                            |
+| Route                                       | Body / result                                                                                                                                                                            |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /OpenLightFX/Studio/Rooms`             | `[{ id, name, screen, bulbs: [BulbDto], suggestedLayout: "LAYOUT_3_0", coveredPositions: ["left","center","right"], updatedAt }]`                                                        |
+| `GET /OpenLightFX/Studio/Rooms/{roomId}`    | One room, same shape. 404 `room_not_found`.                                                                                                                                              |
+| `POST /OpenLightFX/Studio/Rooms`            | `{ name, screenDeviceId, bulbs: [{ id, position, follows }] }` → 201 with the room. 400 `name_required`, `name_taken`, `screen_required`, `unknown_bulb`.                                |
+| `PUT /OpenLightFX/Studio/Rooms/{roomId}`    | Same body; replaces the room's name, screen, and bulb set. `If-Match: {updatedAt}` required → 412 `stale` if it differs. A screen or bulb assigned to another room cannot be reassigned. |
+| `DELETE /OpenLightFX/Studio/Rooms/{roomId}` | 204. Its bulbs get `roomId: null`; its screen is free.                                                                                                                                   |
 
 `BulbDto` = `{ id, name, protocol, model, ipAddress, macAddress, roomId, position, follows, capabilities: { rgb, colorTemp, minTransitionMs }, lastSeenAt, reachable }`.
 
@@ -140,7 +140,7 @@ Studio uses it to choose the first screen (FLOW-001) and enforce administrator-o
 ]
 ```
 
-Source: Emby's `IDeviceManager.GetDevices(new DeviceQuery())` (present in the 4.9.3.0 SDK in `lib/MediaBrowser.Controller.dll`), which includes devices that are not connected right now, merged with `ISessionManager.Sessions` for live activity. `unassignedPlayback` is `{ itemName, at }` when the plugin recently skipped lighting because this device is in no room (WATCH-002). The existing `GET /OpenLightFX/Devices` stays for compatibility.
+Source: Emby's `IDeviceManager.GetDevices(new DeviceQuery())` (present in the 4.9.3.0 SDK in `lib/MediaBrowser.Controller.dll`), which includes devices that are not connected right now, merged with `ISessionManager.Sessions` for live activity. Return every known device without filtering by user or room; include room assignment so Studio can label and disable devices already assigned elsewhere. `unassignedPlayback` is `{ itemName, at }` when the plugin recently skipped lighting because this device is in no room (WATCH-002). The existing `GET /OpenLightFX/Devices` stays for compatibility.
 
 ### Bulbs
 
@@ -154,7 +154,7 @@ Source: Emby's `IDeviceManager.GetDevices(new DeviceQuery())` (present in the 4.
 
 ### Routing
 
-`GET /OpenLightFX/Studio/Rooms/{roomId}/Routing?layout=LAYOUT_5_0`, or `POST` the same path with `{ channels: [{ id, spatialHint }] }` for a track whose channels are not a plain layout. →
+`GET /OpenLightFX/Studio/Rooms/{roomId}/Routing?layout=LAYOUT_5_0`, or `POST` the same path with `{ channels: [{ id, spatialHint, displayName? }] }` for a track whose channels are not a plain layout. The response includes the inferred/selected `layout`, channel `position`, `bulbIds`, `foldedInto: string[]`, and per-bulb ordered sources. →
 
 ```json
 {
@@ -164,13 +164,13 @@ Source: Emby's `IDeviceManager.GetDevices(new DeviceQuery())` (present in the 4.
       "channelId": "left",
       "position": "left",
       "bulbIds": ["wiz:a8…"],
-      "foldedInto": null
+      "foldedInto": []
     },
     {
       "channelId": "surround-left",
       "position": "surround-left",
       "bulbIds": ["wiz:a8…"],
-      "foldedInto": "left"
+      "foldedInto": ["left"]
     }
   ],
   "bulbs": [
@@ -198,7 +198,7 @@ Studio uses it only to label lanes (EDIT-004). Both playback and preview call `R
 
 ### Active track
 
-`POST /OpenLightFX/Studio/Items/{itemId}/ActiveTrack` with `{ trackId }` → `{ trackId, embyUrl: "/web/index.html#!/item?id={itemId}&serverId={serverId}" }`. Resolves the track path through `StudioTrackIndex`, calls `TrackSelectionService.SetSelectedTrack(itemId, path)` (global), and clears any `itemId:deviceId` selections for that item so every room plays it (WATCH-001, OQ-J1-7). Uses the single shared `TrackSelectionService`.
+`POST /OpenLightFX/Studio/Items/{itemId}/ActiveTrack` with `{ trackId, serverId? }` → `{ trackId, embyUrl: "/web/index.html#!/item?id={itemId}&serverId={serverId}" }`. Resolves the track path through `StudioTrackIndex`, sets the global movie selection, and clears any `itemId:deviceId` selections for that item so every room plays it (WATCH-001, OQ-J1-7). Uses the single shared `TrackSelectionService`.
 
 ### Library additions
 

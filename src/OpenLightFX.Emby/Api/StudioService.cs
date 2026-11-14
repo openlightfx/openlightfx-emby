@@ -18,6 +18,7 @@ using OpenLightFX.Emby.Configuration;
 using OpenLightFX.Emby.Drivers;
 using OpenLightFX.Emby.Services;
 using OpenLightFX.Emby.Studio;
+using OpenLightFX.Emby.Rooms;
 
 // ─── Requests ──────────────────────────────────────────────────────────
 
@@ -100,6 +101,15 @@ public class PutStudioTrack : IRequiresRequestStream, IReturn<StudioTrackRespons
     public Stream? RequestStream { get; set; }
 }
 
+[Route("/OpenLightFX/Studio/Items/{ItemId}/ActiveTrack", "POST", Description = "Select the active track for every room")]
+[Authenticated(Roles = "Admin")]
+public class PostStudioActiveTrack : IReturn<StudioActiveTrackResponse>
+{
+    public string ItemId { get; set; } = "";
+    public string TrackId { get; set; } = "";
+    public string? ServerId { get; set; }
+}
+
 [Route("/OpenLightFX/Studio/Projects/{TrackId}", "GET", Description = "Read the Studio project sidecar")]
 [Authenticated]
 public class GetStudioProject
@@ -121,7 +131,8 @@ public class PutStudioProject : IRequiresRequestStream
 [Authenticated(Roles = "Admin")]
 public class StartStudioPreview : IReturn<StudioPreviewResponse>
 {
-    public Dictionary<string, List<string>>? Mapping { get; set; }
+    public string RoomId { get; set; } = "";
+    public List<StudioRoutingChannelInput> Channels { get; set; } = new();
     public bool? Takeover { get; set; }
 }
 
@@ -250,6 +261,13 @@ public class StudioStreamUrlResponse
 }
 
 [DataContract]
+public class StudioActiveTrackResponse
+{
+    [DataMember(Name = "trackId"), JsonPropertyName("trackId")] public string TrackId { get; set; } = "";
+    [DataMember(Name = "embyUrl"), JsonPropertyName("embyUrl")] public string EmbyUrl { get; set; } = "";
+}
+
+[DataContract]
 public class StudioTrackResponse
 {
     [DataMember(Name = "trackId")]
@@ -328,9 +346,9 @@ public class StudioProxyStatusResponse
 [DataContract]
 public class StudioPreviewStateDto
 {
-    [DataMember(Name = "bulbId")]
-    [JsonPropertyName("bulbId")]
-    public string BulbId { get; set; } = "";
+    [DataMember(Name = "channelId")]
+    [JsonPropertyName("channelId")]
+    public string ChannelId { get; set; } = "";
 
     [DataMember(Name = "r")]
     [JsonPropertyName("r")]
@@ -832,11 +850,54 @@ public class StudioService : IService, IRequiresRequest
             "application/json; charset=utf-8",
             new Dictionary<string, string> { ["Cache-Control"] = "no-cache" });
 
+    public object Post(PostStudioActiveTrack request)
+    {
+        var entry = RequireEntry();
+        if (string.IsNullOrWhiteSpace(request.ItemId)) throw new ArgumentException("itemId_required: A movie is required.");
+        if (!StudioTrackFiles.IsSafeTrackId(request.TrackId)) throw new ArgumentException("track_not_found: The selected track is not available.");
+        var item = RequireItem(request.ItemId);
+        var publicItemId = PublicItemId(item);
+        if (!entry.StudioTrackIndex.TryGet(request.TrackId, out var track) ||
+            !string.Equals(track.ItemId, publicItemId, StringComparison.Ordinal) ||
+            !File.Exists(track.FilePath))
+            throw new ResourceNotFoundException("track_not_found: The selected track is not available for this movie.");
+
+        entry.SelectionService.SetGlobalSelectionAndClearDeviceOverrides(publicItemId, track.FilePath);
+        var serverQuery = string.IsNullOrWhiteSpace(request.ServerId)
+            ? string.Empty
+            : $"&serverId={Uri.EscapeDataString(request.ServerId)}";
+        return new StudioActiveTrackResponse
+        {
+            TrackId = request.TrackId,
+            EmbyUrl = $"/web/index.html#!/item?id={Uri.EscapeDataString(publicItemId)}{serverQuery}"
+        };
+    }
+
     public async Task<object> Post(StartStudioPreview request)
     {
         var entry = RequireEntry();
-        var mapping = (IReadOnlyDictionary<string, IReadOnlyList<string>>)(request.Mapping ?? new Dictionary<string, List<string>>())
-            .ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value);
+        var room = entry.RoomStore.FindRoom(request.RoomId)
+            ?? throw new ResourceNotFoundException("room_not_found: Room not found.");
+        var roomBulbs = room.Bulbs
+            .Select(assignment => entry.RoomStore.FindBulb(assignment.Id))
+            .Where(bulb => bulb?.Config != null)
+            .Select(bulb => bulb!.Config)
+            .ToList();
+        if (roomBulbs.Count == 0)
+            throw new ArgumentException("room_has_no_bulbs: Add a bulb to this room before starting preview.");
+        if (request.Channels.Count == 0)
+            throw new ArgumentException("channels_required: Select a track with at least one channel.");
+
+        var channels = request.Channels.Select(channel =>
+            new RoutingChannel(channel.Id, channel.SpatialHint, channel.DisplayName)).ToArray();
+        var routing = RoomRouter.Route(channels, room, entry.RoomStore.Bulbs);
+        var mapping = routing.Channels
+            .Where(channel => channel.BulbIds.Count > 0)
+            .ToDictionary(channel => channel.ChannelId,
+                channel => (IReadOnlyList<string>)channel.BulbIds,
+                StringComparer.Ordinal);
+        if (mapping.Count == 0)
+            throw new ArgumentException("room_has_no_bulbs: Place at least one bulb in this room before previewing.");
 
         if (request.Takeover == true)
             await entry.SuspendPlaybackLightingAsync().ConfigureAwait(false);
@@ -845,7 +906,7 @@ public class StudioService : IService, IRequiresRequest
             () => entry.ActiveSessionCount > 0,
             request.Takeover == true,
             mapping,
-            LoadBulbs(),
+            roomBulbs,
             PhotosensitivityEnabled(),
             BulbDriverFactory.Create,
             DateTimeOffset.UtcNow).ConfigureAwait(false);
@@ -853,7 +914,7 @@ public class StudioService : IService, IRequiresRequest
         if (!started)
             throw new ConflictException("playback_active");
 
-        _logger.Info("Studio preview started");
+        _logger.Info("Studio preview started for room {0}", room.Name);
         return new StudioPreviewResponse { Status = "started", Active = true };
     }
 
@@ -861,13 +922,13 @@ public class StudioService : IService, IRequiresRequest
     {
         var entry = RequireEntry();
         var samples = (request.States ?? new List<StudioPreviewStateDto>())
-            .Select(state => new StudioPreviewSample(
-                state.BulbId, state.R, state.G, state.B, state.Brightness, state.TransitionMs))
+            .Select(state => new StudioPreviewChannelSample(
+                state.ChannelId, state.R, state.G, state.B, state.Brightness, state.TransitionMs))
             .ToList();
 
         try
         {
-            await entry.Preview.SubmitFrameAsync(samples, DateTimeOffset.UtcNow).ConfigureAwait(false);
+            await entry.Preview.SubmitChannelFrameAsync(samples, DateTimeOffset.UtcNow).ConfigureAwait(false);
         }
         catch (StudioPreviewNotActiveException)
         {

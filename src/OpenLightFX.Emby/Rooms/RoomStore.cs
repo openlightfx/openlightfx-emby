@@ -27,7 +27,7 @@ public sealed class RoomStore
     public KnownBulbRecord? FindBulb(string id) { lock (_gate) return _document.Bulbs.FirstOrDefault(x => x.Id == id); }
 
     public RoomRecord SaveRoom(string? roomId, string name, string deviceId, string deviceName, string appName,
-        IReadOnlyList<RoomBulbAssignment> assignments, string? expectedUpdatedAt = null, bool moveFromOtherRooms = false)
+        IReadOnlyList<RoomBulbAssignment> assignments, string? expectedUpdatedAt = null)
     {
         lock (_gate)
         {
@@ -48,18 +48,12 @@ public sealed class RoomStore
             {
                 var bulb = _document.Bulbs.FirstOrDefault(x => x.Id == assignment.Id);
                 if (bulb == null) throw new RoomStoreException("unknown_bulb", "A selected bulb is no longer known.");
-                if (bulb.RoomId != null && bulb.RoomId != roomId && !moveFromOtherRooms)
-                    throw new RoomStoreException("in_other_room", "A selected bulb belongs to another room.");
+                if (bulb.RoomId != null && bulb.RoomId != roomId)
+                    throw new RoomStoreException("in_other_room", "That bulb is already assigned to another room.");
                 if (assignment.Position != null && !RoomPositions.All.Contains(assignment.Position))
                     throw new RoomStoreException("invalid_position", "Choose a valid bulb position.");
                 if (assignment.Follows != null && !RoomPositions.All.Contains(assignment.Follows))
                     throw new RoomStoreException("invalid_follows", "Choose a valid Follows position.");
-            }
-            if (moveFromOtherRooms)
-            {
-                foreach (var assignment in assignments)
-                    foreach (var other in _document.Rooms.Where(x => x.Id != roomId && x.Bulbs.Any(b => b.Id == assignment.Id)))
-                    { other.Bulbs.RemoveAll(b => b.Id == assignment.Id); other.UpdatedAt = Now(); }
             }
             foreach (var bulb in _document.Bulbs.Where(x => x.RoomId == roomId)) bulb.RoomId = null;
             var updated = Now();

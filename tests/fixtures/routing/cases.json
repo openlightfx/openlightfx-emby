@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "Ambient lights every bulb",
+      "channels": [{ "id": "ambient", "spatialHint": "SPATIAL_AMBIENT" }],
+      "bulbs": [
+        { "id": "left-bulb", "position": "left" },
+        { "id": "right-bulb", "position": "right" }
+      ],
+      "channelBulbs": { "ambient": ["left-bulb", "right-bulb"] },
+      "bulbSources": {
+        "left-bulb": ["ambient"],
+        "right-bulb": ["ambient"]
+      }
+    },
+    {
+      "name": "2.0 fills center and surrounds in a 5.0 room",
+      "channels": [
+        { "id": "left", "spatialHint": "SPATIAL_LEFT" },
+        { "id": "right", "spatialHint": "SPATIAL_RIGHT" }
+      ],
+      "bulbs": [
+        { "id": "left-bulb", "position": "left" },
+        { "id": "center-bulb", "position": "center" },
+        { "id": "right-bulb", "position": "right" },
+        { "id": "sl-bulb", "position": "surround-left" },
+        { "id": "sr-bulb", "position": "surround-right" }
+      ],
+      "channelBulbs": {
+        "left": ["left-bulb", "center-bulb", "sl-bulb"],
+        "right": ["center-bulb", "right-bulb", "sr-bulb"]
+      },
+      "bulbSources": {
+        "left-bulb": ["left"],
+        "center-bulb": ["left", "right"],
+        "right-bulb": ["right"],
+        "sl-bulb": ["left"],
+        "sr-bulb": ["right"]
+      }
+    },
+    {
+      "name": "3.0 center folds to left and right",
+      "channels": [
+        { "id": "left", "spatialHint": "SPATIAL_LEFT" },
+        { "id": "center", "spatialHint": "SPATIAL_CENTER" },
+        { "id": "right", "spatialHint": "SPATIAL_RIGHT" }
+      ],
+      "bulbs": [
+        { "id": "left-bulb", "position": "left" },
+        { "id": "right-bulb", "position": "right" }
+      ],
+      "channelBulbs": {
+        "left": ["left-bulb"],
+        "center": ["left-bulb", "right-bulb"],
+        "right": ["right-bulb"]
+      },
+      "bulbSources": {
+        "left-bulb": ["left", "center"],
+        "right-bulb": ["center", "right"]
+      }
+    },
+    {
+      "name": "5.0 surround channels fold into front when missing",
+      "channels": [
+        { "id": "left", "spatialHint": "SPATIAL_LEFT" },
+        { "id": "center", "spatialHint": "SPATIAL_CENTER" },
+        { "id": "right", "spatialHint": "SPATIAL_RIGHT" },
+        { "id": "surround-left", "spatialHint": "SPATIAL_SURROUND_LEFT" },
+        { "id": "surround-right", "spatialHint": "SPATIAL_SURROUND_RIGHT" }
+      ],
+      "bulbs": [
+        { "id": "left-bulb", "position": "left" },
+        { "id": "right-bulb", "position": "right" },
+        { "id": "sl-bulb", "position": "surround-left" },
+        { "id": "sr-bulb", "position": "surround-right" }
+      ],
+      "channelBulbs": {
+        "left": ["left-bulb"],
+        "center": ["left-bulb", "right-bulb"],
+        "right": ["right-bulb"],
+        "surround-left": ["sl-bulb"],
+        "surround-right": ["sr-bulb"]
+      },
+      "bulbSources": {
+        "left-bulb": ["left", "center"],
+        "right-bulb": ["center", "right"],
+        "sl-bulb": ["surround-left"],
+        "sr-bulb": ["surround-right"]
+      }
+    },
+    {
+      "name": "5.0 track fills only-Ambient room",
+      "channels": [
+        { "id": "left", "spatialHint": "SPATIAL_LEFT" },
+        { "id": "center", "spatialHint": "SPATIAL_CENTER" },
+        { "id": "right", "spatialHint": "SPATIAL_RIGHT" },
+        { "id": "surround-left", "spatialHint": "SPATIAL_SURROUND_LEFT" },
+        { "id": "surround-right", "spatialHint": "SPATIAL_SURROUND_RIGHT" }
+      ],
+      "bulbs": [{ "id": "ambient-bulb", "position": "ambient" }],
+      "channelBulbs": {
+        "left": ["ambient-bulb"],
+        "center": ["ambient-bulb"],
+        "right": ["ambient-bulb"],
+        "surround-left": ["ambient-bulb"],
+        "surround-right": ["ambient-bulb"]
+      },
+      "bulbSources": {
+        "ambient-bulb": ["left", "center", "right", "surround-left", "surround-right"]
+      }
+    },
+    {
+      "name": "Follows override changes a bulb to Ambient routing",
+      "channels": [
+        { "id": "left", "spatialHint": "SPATIAL_LEFT" },
+        { "id": "center", "spatialHint": "SPATIAL_CENTER" },
+        { "id": "right", "spatialHint": "SPATIAL_RIGHT" }
+      ],
+      "bulbs": [
+        { "id": "left-bulb", "position": "left" },
+        { "id": "center-bulb", "position": "center", "follows": "ambient" },
+        { "id": "right-bulb", "position": "right" }
+      ],
+      "channelBulbs": {
+        "left": ["left-bulb", "center-bulb"],
+        "center": ["left-bulb", "center-bulb", "right-bulb"],
+        "right": ["center-bulb", "right-bulb"]
+      },
+      "bulbSources": {
+        "left-bulb": ["left", "center"],
+        "center-bulb": ["left", "center", "right"],
+        "right-bulb": ["center", "right"]
+      }
+    }
+  ],
+  "mixing": [
+    {
+      "name": "brightness-weighted RGB with maximum brightness",
+      "sources": [
+        { "r": 255, "g": 0, "b": 0, "brightness": 100 },
+        { "r": 0, "g": 0, "b": 255, "brightness": 50 }
+      ],
+      "expected": { "r": 170, "g": 0, "b": 85, "brightness": 100 }
+    },
+    {
+      "name": "zero brightness is off",
+      "sources": [
+        { "r": 255, "g": 0, "b": 0, "brightness": 0 },
+        { "r": 0, "g": 0, "b": 255, "brightness": 0 }
+      ],
+      "expected": { "r": 0, "g": 0, "b": 0, "brightness": 0 }
+    }
+  ]
+}

@@ -266,6 +266,7 @@ public class PlaybackSession
             _currentPositionMs = _syncPositionMs + elapsedMs;
 
             ProcessKeyframes(_currentPositionMs);
+            _channelManager.ClearEffectStates();
             ProcessEffects(_currentPositionMs);
 
             // Dispatch to bulbs if enough time has elapsed since last dispatch
@@ -330,7 +331,7 @@ public class PlaybackSession
                     var state = new InterpolationEngine.InterpolatedState(
                         activeCmd.R, activeCmd.G, activeCmd.B,
                         activeCmd.Brightness, 0, ColorMode.Rgb, true);
-                    _channelManager.SetChannelState(channelId, state);
+                    _channelManager.SetEffectChannelState(channelId, state);
                 }
 
                 // Clean up expired effect windows (1s grace period after end)

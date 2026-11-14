@@ -20,6 +20,14 @@ public readonly record struct StudioPreviewSample(
     int Brightness,
     int TransitionMs);
 
+public readonly record struct StudioPreviewChannelSample(
+    string ChannelId,
+    int R,
+    int G,
+    int B,
+    int Brightness,
+    int TransitionMs);
+
 public sealed record StudioPreviewBulb(
     string BulbId,
     IBulbDriver Driver,

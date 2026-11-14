@@ -4,7 +4,6 @@ using System.Text.Json.Serialization;
 using System.Runtime.Serialization;
 using MediaBrowser.Model.Services;
 using MediaBrowser.Controller.Net;
-using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Devices;
 using MediaBrowser.Model.Devices;
 using OpenLightFX.Emby.Discovery;
@@ -29,6 +28,20 @@ public sealed class UpdateStudioRoom : StudioRoomWrite, IReturn<StudioRoomDto> {
 [Route("/OpenLightFX/Studio/Rooms/{RoomId}", "DELETE")]
 [Authenticated(Roles = "Admin")]
 public sealed class DeleteStudioRoom { public string RoomId { get; set; } = ""; }
+[Route("/OpenLightFX/Studio/Rooms/{RoomId}/Routing", "GET")]
+[Authenticated]
+public sealed class GetStudioRoomRouting : IReturn<StudioRoutingDto>
+{
+    public string RoomId { get; set; } = "";
+    public string? Layout { get; set; }
+}
+[Route("/OpenLightFX/Studio/Rooms/{RoomId}/Routing", "POST")]
+[Authenticated]
+public sealed class PostStudioRoomRouting : IReturn<StudioRoutingDto>
+{
+    public string RoomId { get; set; } = "";
+    public List<StudioRoutingChannelInput> Channels { get; set; } = new();
+}
 public class StudioRoomWrite
 {
     public string Name { get; set; } = "";
@@ -36,7 +49,6 @@ public class StudioRoomWrite
     public string? DeviceName { get; set; }
     public string? AppName { get; set; }
     public List<RoomBulbAssignment> Bulbs { get; set; } = new();
-    public bool MoveFromOtherRooms { get; set; }
 }
 [Route("/OpenLightFX/Studio/Devices", "GET")]
 [Authenticated]
@@ -60,6 +72,40 @@ public sealed class StudioSetupDto
 public sealed class StudioRoomAdminCapabilityDto
 {
     [DataMember(Name = "canManageRooms"), JsonPropertyName("canManageRooms")] public bool CanManageRooms { get; set; }
+}
+[DataContract]
+public sealed class StudioRoutingChannelInput
+{
+    [DataMember(Name = "id"), JsonPropertyName("id")] public string Id { get; set; } = "";
+    [DataMember(Name = "spatialHint"), JsonPropertyName("spatialHint")] public string? SpatialHint { get; set; }
+    [DataMember(Name = "displayName"), JsonPropertyName("displayName")] public string? DisplayName { get; set; }
+}
+[DataContract]
+public sealed class StudioRoutingDto
+{
+    [DataMember(Name = "layout"), JsonPropertyName("layout")] public string? Layout { get; set; }
+    [DataMember(Name = "channels"), JsonPropertyName("channels")] public List<StudioRoutedChannelDto> Channels { get; set; } = new();
+    [DataMember(Name = "bulbs"), JsonPropertyName("bulbs")] public List<StudioRoutedBulbDto> Bulbs { get; set; } = new();
+}
+[DataContract]
+public sealed class StudioRoutedChannelDto
+{
+    [DataMember(Name = "channelId"), JsonPropertyName("channelId")] public string ChannelId { get; set; } = "";
+    [DataMember(Name = "position"), JsonPropertyName("position")] public string? Position { get; set; }
+    [DataMember(Name = "bulbIds"), JsonPropertyName("bulbIds")] public List<string> BulbIds { get; set; } = new();
+    [DataMember(Name = "foldedInto"), JsonPropertyName("foldedInto")] public List<string> FoldedInto { get; set; } = new();
+}
+[DataContract]
+public sealed class StudioRoutedBulbDto
+{
+    [DataMember(Name = "bulbId"), JsonPropertyName("bulbId")] public string BulbId { get; set; } = "";
+    [DataMember(Name = "sources"), JsonPropertyName("sources")] public List<StudioRoutedSourceDto> Sources { get; set; } = new();
+}
+[DataContract]
+public sealed class StudioRoutedSourceDto
+{
+    [DataMember(Name = "channelId"), JsonPropertyName("channelId")] public string ChannelId { get; set; } = "";
+    [DataMember(Name = "kind"), JsonPropertyName("kind")] public string Kind { get; set; } = "";
 }
 [DataContract]
 public sealed class StudioRoomDto
@@ -105,7 +151,6 @@ public sealed class StudioDeviceDto
     [DataMember(Name = "name"), JsonPropertyName("name")] public string Name { get; set; } = "";
     [DataMember(Name = "appName"), JsonPropertyName("appName")] public string AppName { get; set; } = "";
     [DataMember(Name = "lastUserName"), JsonPropertyName("lastUserName")] public string? LastUserName { get; set; }
-    [DataMember(Name = "lastUserId"), JsonPropertyName("lastUserId")] public string? LastUserId { get; set; }
     [DataMember(Name = "lastActivity"), JsonPropertyName("lastActivity")] public DateTimeOffset? LastActivity { get; set; }
     [DataMember(Name = "roomId"), JsonPropertyName("roomId")] public string? RoomId { get; set; }
     [DataMember(Name = "roomName"), JsonPropertyName("roomName")] public string? RoomName { get; set; }
@@ -122,23 +167,58 @@ public sealed class RoomsService : IService, IRequiresRequest
     private readonly IDeviceManager _deviceManager;
     public IRequest Request { get; set; } = null!;
 
-    public RoomsService(IDeviceManager deviceManager)
-    {
-        _deviceManager = deviceManager;
-    }
+    public RoomsService(IDeviceManager deviceManager) => _deviceManager = deviceManager;
     private static ServerEntryPoint Entry => ServerEntryPoint.Instance ?? throw new InvalidOperationException("OpenLightFX is not ready.");
     private static Exception Error(RoomStoreException exception) => new ArgumentException($"{exception.Code}: {exception.Message}");
 
-    public object Get(GetStudioSetup request)
-    {
-        var entry = Entry;
-        return new StudioSetupDto { RoomCount = entry.RoomStore.Rooms.Count };
-    }
+    public object Get(GetStudioSetup request) =>
+        new StudioSetupDto { RoomCount = Entry.RoomStore.Rooms.Count };
 
     public object Get(GetStudioRoomAdminCapability request) =>
         new StudioRoomAdminCapabilityDto { CanManageRooms = true };
 
     public object Get(GetStudioRooms request) => Entry.RoomStore.Rooms.Select(MapRoom).ToList();
+
+    public object Get(GetStudioRoomRouting request)
+    {
+        var layout = string.IsNullOrWhiteSpace(request.Layout) ? "LAYOUT_2_0" : request.Layout;
+        return Route(request.RoomId, RoomRouter.ForLayout(layout), layout);
+    }
+
+    public object Post(PostStudioRoomRouting request)
+    {
+        var channels = request.Channels.Select(channel =>
+            new RoutingChannel(channel.Id, channel.SpatialHint, channel.DisplayName)).ToArray();
+        return Route(request.RoomId, channels, null);
+    }
+
+    private static StudioRoutingDto Route(string roomId, IReadOnlyList<RoutingChannel> channels, string? layout)
+    {
+        var entry = Entry;
+        var room = entry.RoomStore.FindRoom(roomId)
+            ?? throw new ArgumentException("room_not_found: Room not found.");
+        var routing = RoomRouter.Route(channels, room, entry.RoomStore.Bulbs);
+        return new StudioRoutingDto
+        {
+            Layout = layout ?? RoomRouter.InferLayout(channels),
+            Channels = routing.Channels.Select(channel => new StudioRoutedChannelDto
+            {
+                ChannelId = channel.ChannelId,
+                Position = channel.Position,
+                BulbIds = channel.BulbIds.ToList(),
+                FoldedInto = channel.FoldedInto.ToList()
+            }).ToList(),
+            Bulbs = routing.Bulbs.Select(bulb => new StudioRoutedBulbDto
+            {
+                BulbId = bulb.BulbId,
+                Sources = bulb.Sources.Select(source => new StudioRoutedSourceDto
+                {
+                    ChannelId = source.ChannelId,
+                    Kind = source.Kind
+                }).ToList()
+            }).ToList()
+        };
+    }
 
     public object Post(CreateStudioRoom request) => Save(null, request, null);
 
@@ -159,14 +239,14 @@ public sealed class RoomsService : IService, IRequiresRequest
         {
             var session = g.OrderByDescending(x => x.LastActivityDate).First();
             var room = rooms.FirstOrDefault(r => r.Screen.DeviceId == session.DeviceId);
-            return new StudioDeviceDto { DeviceId = session.DeviceId!, Name = session.DeviceName ?? "Unknown device", AppName = session.Client ?? "Emby", LastUserName = session.UserName, LastUserId = session.UserId, LastActivity = session.LastActivityDate, RoomId = room?.Id, RoomName = room?.Name };
+            return new StudioDeviceDto { DeviceId = session.DeviceId!, Name = session.DeviceName ?? "Unknown device", AppName = session.Client ?? "Emby", LastUserName = session.UserName, LastActivity = session.LastActivityDate, RoomId = room?.Id, RoomName = room?.Name };
         }).ToList();
         foreach (var registered in _deviceManager.GetDevices(new DeviceQuery { Limit = 500 }).Items ?? Array.Empty<DeviceInfo>())
         {
             var deviceId = registered.ReportedDeviceId;
             if (string.IsNullOrWhiteSpace(deviceId) || devices.Any(d => d.DeviceId == deviceId)) continue;
             var room = rooms.FirstOrDefault(r => r.Screen.DeviceId == deviceId);
-            devices.Add(new StudioDeviceDto { DeviceId = deviceId, Name = registered.Name ?? "Emby device", AppName = registered.AppName ?? "Emby", LastUserName = registered.LastUserName, LastUserId = registered.LastUserId, LastActivity = registered.DateLastActivity == default ? null : registered.DateLastActivity, RoomId = room?.Id, RoomName = room?.Name });
+            devices.Add(new StudioDeviceDto { DeviceId = deviceId, Name = registered.Name ?? "Emby device", AppName = registered.AppName ?? "Emby", LastUserName = registered.LastUserName, LastActivity = registered.DateLastActivity == default ? null : registered.DateLastActivity, RoomId = room?.Id, RoomName = room?.Name });
         }
         foreach (var room in rooms)
             if (!devices.Any(d => d.DeviceId == room.Screen.DeviceId))
@@ -226,7 +306,7 @@ public sealed class RoomsService : IService, IRequiresRequest
         var appName = session?.Client ?? registered?.AppName ?? existingScreen?.AppName ?? "Emby";
         try
         {
-            var room = entry.RoomStore.SaveRoom(roomId, request.Name, request.ScreenDeviceId, deviceName, appName, request.Bulbs, match, request.MoveFromOtherRooms);
+            var room = entry.RoomStore.SaveRoom(roomId, request.Name, request.ScreenDeviceId, deviceName, appName, request.Bulbs, match);
             return MapRoom(room);
         }
         catch (RoomStoreException ex) { throw Error(ex); }

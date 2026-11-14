@@ -6,6 +6,7 @@ using System.Text.Json;
 public class TrackSelectionService
 {
     private readonly string _selectionsFilePath;
+    private readonly object _gate = new();
     private Dictionary<string, TrackSelection> _selections;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -28,29 +29,27 @@ public class TrackSelectionService
     /// </summary>
     public string? GetSelectedTrack(string itemId, string? deviceId = null)
     {
-        // Check device-scoped selection first
-        if (!string.IsNullOrEmpty(deviceId))
+        lock (_gate)
         {
-            var deviceKey = $"{itemId}:{deviceId}";
-            if (_selections.TryGetValue(deviceKey, out var deviceSel))
-                return deviceSel.TrackPath;
+            if (!string.IsNullOrEmpty(deviceId) &&
+                _selections.TryGetValue($"{itemId}:{deviceId}", out var deviceSelection))
+                return deviceSelection.TrackPath;
+            return _selections.TryGetValue(itemId, out var selection) ? selection.TrackPath : null;
         }
-
-        // Fall back to global selection
-        return _selections.TryGetValue(itemId, out var sel) ? sel.TrackPath : null;
     }
 
     /// <summary>Get the global selected track path (no device scope).</summary>
     public string? GetGlobalSelectedTrack(string itemId)
     {
-        return _selections.TryGetValue(itemId, out var sel) ? sel.TrackPath : null;
+        lock (_gate)
+            return _selections.TryGetValue(itemId, out var selection) ? selection.TrackPath : null;
     }
 
     /// <summary>Get the device-scoped selected track path, or null.</summary>
     public string? GetDeviceSelectedTrack(string itemId, string deviceId)
     {
-        var deviceKey = $"{itemId}:{deviceId}";
-        return _selections.TryGetValue(deviceKey, out var sel) ? sel.TrackPath : null;
+        lock (_gate)
+            return _selections.TryGetValue($"{itemId}:{deviceId}", out var selection) ? selection.TrackPath : null;
     }
 
     /// <summary>
@@ -59,14 +58,36 @@ public class TrackSelectionService
     /// </summary>
     public void SetSelectedTrack(string itemId, string trackPath, string? deviceId = null)
     {
-        var key = string.IsNullOrEmpty(deviceId) ? itemId : $"{itemId}:{deviceId}";
-        _selections[key] = new TrackSelection
+        lock (_gate)
         {
-            ItemId = itemId,
-            TrackPath = trackPath,
-            SelectedAt = DateTime.UtcNow
-        };
-        Save();
+            var key = string.IsNullOrEmpty(deviceId) ? itemId : $"{itemId}:{deviceId}";
+            _selections[key] = new TrackSelection
+            {
+                ItemId = itemId,
+                TrackPath = trackPath,
+                SelectedAt = DateTime.UtcNow
+            };
+            Save();
+        }
+    }
+
+    /// <summary>Set the movie-wide selection and clear every legacy device override for that item.</summary>
+    public void SetGlobalSelectionAndClearDeviceOverrides(string itemId, string trackPath)
+    {
+        lock (_gate)
+        {
+            foreach (var key in _selections.Keys
+                .Where(key => key.StartsWith(itemId + ":", StringComparison.Ordinal))
+                .ToArray())
+                _selections.Remove(key);
+            _selections[itemId] = new TrackSelection
+            {
+                ItemId = itemId,
+                TrackPath = trackPath,
+                SelectedAt = DateTime.UtcNow
+            };
+            Save();
+        }
     }
 
     /// <summary>
@@ -75,13 +96,19 @@ public class TrackSelectionService
     /// </summary>
     public void ClearSelectedTrack(string itemId, string? deviceId = null)
     {
-        var key = string.IsNullOrEmpty(deviceId) ? itemId : $"{itemId}:{deviceId}";
-        if (_selections.Remove(key))
-            Save();
+        lock (_gate)
+        {
+            var key = string.IsNullOrEmpty(deviceId) ? itemId : $"{itemId}:{deviceId}";
+            if (_selections.Remove(key)) Save();
+        }
     }
 
     /// <summary>Get all track selections.</summary>
-    public IReadOnlyDictionary<string, TrackSelection> GetAllSelections() => _selections;
+    public IReadOnlyDictionary<string, TrackSelection> GetAllSelections()
+    {
+        lock (_gate)
+            return new Dictionary<string, TrackSelection>(_selections);
+    }
 
     private Dictionary<string, TrackSelection> Load()
     {

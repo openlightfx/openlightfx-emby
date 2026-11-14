@@ -48,6 +48,20 @@ public sealed class RoomStoreTests : IDisposable
     }
 
     [Fact]
+    public void RejectsBulbsAssignedToAnotherRoomWithoutMovingThem()
+    {
+        var store = new RoomStore(_directory);
+        var bulb = store.UpsertBulb(new WizBulbConfig { Name = "Lamp", IpAddress = IPAddress.Parse("192.0.2.5") });
+        var bedroom = store.SaveRoom(null, "Bedroom", "device-1", "TV", "Emby", new[] { new RoomBulbAssignment { Id = bulb.Id, Position = "left" } });
+
+        Assert.Equal("in_other_room", Assert.Throws<RoomStoreException>(() =>
+            store.SaveRoom(null, "Living Room", "device-2", "TV 2", "Emby", new[] { new RoomBulbAssignment { Id = bulb.Id, Position = "right" } })).Code);
+        Assert.Single(store.Rooms);
+        Assert.Equal(bedroom.Id, store.Bulbs.Single().RoomId);
+        Assert.Equal("left", store.Rooms.Single().Bulbs.Single().Position);
+    }
+
+    [Fact]
     public void RejectsDuplicateBulbAssignments()
     {
         var store = new RoomStore(_directory);
