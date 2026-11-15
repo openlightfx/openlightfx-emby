@@ -48,6 +48,7 @@ public sealed class RoomStore
             {
                 var bulb = _document.Bulbs.FirstOrDefault(x => x.Id == assignment.Id);
                 if (bulb == null) throw new RoomStoreException("unknown_bulb", "A selected bulb is no longer known.");
+                if (!bulb.IsNamed) throw new RoomStoreException("bulb_not_named", "Name this bulb in Bulbs before adding it to a room.");
                 if (bulb.RoomId != null && bulb.RoomId != roomId)
                     throw new RoomStoreException("in_other_room", "That bulb is already assigned to another room.");
                 if (assignment.Position != null && !RoomPositions.All.Contains(assignment.Position))
@@ -90,12 +91,36 @@ public sealed class RoomStore
         {
             var id = stableId ?? StableBulbId.From(config);
             var bulb = _document.Bulbs.FirstOrDefault(x => x.Id == id)
-                ?? _document.Bulbs.FirstOrDefault(x => x.Config.Protocol == config.Protocol &&
-                    ((!string.IsNullOrWhiteSpace(config.MacAddress) && NormalizeMac(x.Config.MacAddress) == NormalizeMac(config.MacAddress)) ||
-                     x.Config.IpAddress.Equals(config.IpAddress)));
-            if (bulb == null) { bulb = new KnownBulbRecord { Id = id, Name = config.Name }; _document.Bulbs.Add(bulb); }
-            bulb.Id = id; config.Id = id; bulb.Config = config; bulb.Name = string.IsNullOrWhiteSpace(bulb.Name) ? config.Name : bulb.Name;
-            bulb.LastSeenAt = Now(); Persist(); return bulb;
+                ?? _document.Bulbs.FirstOrDefault(x => x.Config.Protocol == config.Protocol && HasSameHardwareId(x.Config, config))
+                ?? _document.Bulbs.FirstOrDefault(x => x.Config.Protocol == config.Protocol && HasSameMac(x.Config, config))
+                ?? _document.Bulbs.FirstOrDefault(x => IsLegacyIdentityMatch(x.Config, config));
+            if (bulb == null)
+            {
+                bulb = new KnownBulbRecord { Id = id, Name = config.Name ?? "" };
+                _document.Bulbs.Add(bulb);
+            }
+            else
+            {
+                var previousId = bulb.Id;
+                var previousConfigName = bulb.Config?.Name;
+                var wasGeneratedName = !bulb.IsNamed &&
+                    (string.IsNullOrWhiteSpace(bulb.Name) || string.Equals(bulb.Name, previousConfigName, StringComparison.Ordinal));
+                if (wasGeneratedName) bulb.Name = config.Name ?? "";
+                if (!string.Equals(previousId, id, StringComparison.Ordinal))
+                {
+                    // Stable identity upgrades (including Govee's old IP ID → LAN device ID)
+                    // must not strand room placements under the previous ID.
+                    foreach (var room in _document.Rooms)
+                        foreach (var assignment in room.Bulbs.Where(x => x.Id == previousId))
+                            assignment.Id = id;
+                }
+            }
+            bulb.Id = id;
+            config.Id = id;
+            bulb.Config = config;
+            bulb.LastSeenAt = Now();
+            Persist();
+            return bulb;
         }
     }
 
@@ -106,8 +131,44 @@ public sealed class RoomStore
             name = (name ?? "").Trim();
             if (name.Length is < 1 or > 40) throw new RoomStoreException("name_required", "Bulb name must be 1–40 characters.");
             var bulb = _document.Bulbs.FirstOrDefault(x => x.Id == id) ?? throw new RoomStoreException("bulb_not_found", "Bulb not found.");
-            bulb.Name = name; Persist(); return bulb;
+            bulb.Name = name;
+            bulb.IsNamed = true;
+            Persist(); return bulb;
         }
+    }
+
+    public void ForgetBulb(string id)
+    {
+        lock (_gate)
+        {
+            var bulb = _document.Bulbs.FirstOrDefault(x => x.Id == id)
+                ?? throw new RoomStoreException("bulb_not_found", "Bulb not found.");
+            if (bulb.RoomId != null)
+                throw new RoomStoreException("in_room", "Remove this bulb from its room before forgetting it.");
+            _document.Bulbs.Remove(bulb);
+            Persist();
+        }
+    }
+
+    private static bool HasSameHardwareId(BulbConfig left, BulbConfig right) =>
+        !string.IsNullOrWhiteSpace(left.HardwareId) && !string.IsNullOrWhiteSpace(right.HardwareId) &&
+        string.Equals(StableBulbId.NormalizeHardwareId(left.HardwareId), StableBulbId.NormalizeHardwareId(right.HardwareId), StringComparison.Ordinal);
+
+    private static bool HasSameMac(BulbConfig left, BulbConfig right) =>
+        !string.IsNullOrWhiteSpace(left.MacAddress) && !string.IsNullOrWhiteSpace(right.MacAddress) &&
+        NormalizeMac(left.MacAddress) == NormalizeMac(right.MacAddress);
+
+    private static bool IsLegacyIdentityMatch(BulbConfig oldConfig, BulbConfig discovered)
+    {
+        if (oldConfig.Protocol != discovered.Protocol) return false;
+        if (discovered.Protocol == BulbProtocol.Govee && !string.IsNullOrWhiteSpace(discovered.HardwareId))
+            return string.IsNullOrWhiteSpace(oldConfig.HardwareId) && string.IsNullOrWhiteSpace(oldConfig.MacAddress) &&
+                string.Equals(StableBulbId.NormalizeHardwareId(oldConfig.Name), StableBulbId.NormalizeHardwareId(discovered.HardwareId), StringComparison.Ordinal);
+
+        // IP matching is only a migration bridge for records that have no stable identity.
+        // Never merge two bulbs whose reported hardware identities conflict.
+        return string.IsNullOrWhiteSpace(oldConfig.HardwareId) && string.IsNullOrWhiteSpace(oldConfig.MacAddress) &&
+            oldConfig.IpAddress.Equals(discovered.IpAddress);
     }
 
     private void Normalize()
@@ -117,7 +178,19 @@ public sealed class RoomStore
         {
             room.Bulbs ??= new();
             foreach (var assignment in room.Bulbs)
-                if (_document.Bulbs.FirstOrDefault(b => b.Id == assignment.Id) is { } bulb) { bulb.RoomId = room.Id; bulb.Position = assignment.Position; bulb.Follows = assignment.Follows; }
+                if (_document.Bulbs.FirstOrDefault(b => b.Id == assignment.Id) is { } bulb)
+                {
+                    bulb.RoomId = room.Id; bulb.Position = assignment.Position; bulb.Follows = assignment.Follows;
+                    // Older room stores predate the explicit named-inventory flag; preserve
+                    // bulbs already deliberately placed in a room.
+                    bulb.IsNamed = true;
+                }
+        }
+        foreach (var bulb in _document.Bulbs)
+        {
+            bulb.Config ??= new RestBulbConfig();
+            if (!string.IsNullOrWhiteSpace(bulb.Name) && !string.Equals(bulb.Name, bulb.Config.Name, StringComparison.Ordinal))
+                bulb.IsNamed = true;
         }
     }
     private void Persist()
@@ -147,7 +220,7 @@ public sealed class RoomScreen { public string DeviceId { get; set; } = ""; publ
 public sealed class RoomBulbAssignment { public string Id { get; set; } = ""; public string? Position { get; set; } public string? Follows { get; set; } }
 public sealed class KnownBulbRecord
 {
-    public string Id { get; set; } = ""; public string Name { get; set; } = ""; public string? RoomId { get; set; }
+    public string Id { get; set; } = ""; public string Name { get; set; } = ""; public bool IsNamed { get; set; } public string? RoomId { get; set; }
     public string? Position { get; set; } public string? Follows { get; set; } public BulbConfig Config { get; set; } = null!;
     public string LastSeenAt { get; set; } = "";
 }
@@ -157,8 +230,19 @@ public static class StableBulbId
     public static string From(BulbConfig config)
     {
         var protocol = config.Protocol.ToString().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(config.HardwareId))
+            return $"{protocol}:{NormalizeHardwareId(config.HardwareId)}";
         var mac = new string((config.MacAddress ?? "").Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
         return mac.Length > 0 ? $"{protocol}:{mac}" : $"{protocol}:ip:{config.IpAddress}";
+    }
+
+    public static string NormalizeHardwareId(string? value)
+    {
+        var trimmed = (value ?? "").Trim();
+        var compact = new string(trimmed.Where(char.IsLetterOrDigit).ToArray());
+        if ((compact.Length is 12 or 16) && compact.All(Uri.IsHexDigit))
+            return compact.ToLowerInvariant();
+        return trimmed.ToLowerInvariant();
     }
 }
 public sealed class RoomStoreException : Exception

@@ -22,26 +22,27 @@ The last Studio rebuild was test-green and unusable, because screens were built 
 
 J1 — First light (spec in the Studio repo):
 
-| Step                 | Plugin work                                                                                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 1. Set up a room     | Rooms CRUD, Emby device list (screens), discovery with stable bulb ids, Identify by id, and Hue pairing. No legacy import.   |
-| 2. Pick a movie      | `GET /OpenLightFX/Studio/Items` (movies only) with poster URLs, track count, active flag.                                      |
-| 3. Open/create track | List, read, validate, and save `.lightfx` files; project sidecar.                                                              |
-| 4. Edit              | Edit-proxy video and MediaInfo, tone-mapped Frame, live preview through a room using the same routing as playback.              |
-| 5. Watch in Emby     | Set the movie's active track; on Emby playback, resolve device → room → bulbs → routing and play.                             |
+| Step                 | Plugin work                                                                                                                  |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 1. Set up bulbs      | Discover and persist inventory, Identify by saved id, save user-chosen names, and forget unassigned bulbs. No legacy import. |
+| 2. Set up a room     | Rooms CRUD and Emby device list (screens); only named bulbs can be assigned.                                                 |
+| 3. Pick a movie      | `GET /OpenLightFX/Studio/Items` (movies only) with poster URLs, track count, active flag.                                    |
+| 4. Open/create track | List, read, validate, and save `.lightfx` files; project sidecar.                                                            |
+| 5. Edit              | Edit-proxy video and MediaInfo, tone-mapped Frame, live preview through a room using the same routing as playback.           |
+| 6. Watch in Emby     | Deferred and incomplete: set the movie's active track; on Emby playback, resolve device → room → bulbs → routing and play.   |
 
 Design for steps 1, 4 (preview), and 5: [`docs/design/rooms-api.md`](docs/design/rooms-api.md).
 
 ## 4. Domain model
 
-| Term     | Meaning                                                                                                   |
-| -------- | --------------------------------------------------------------------------------------------------------- |
+| Term     | Meaning                                                                                                    |
+| -------- | ---------------------------------------------------------------------------------------------------------- |
 | Room     | Name, exactly one screen, its bulbs. Stored in `{DataPath}/OpenLightFX/rooms.json` (proposed).             |
 | Screen   | Emby `deviceId` of the playback device in the room. In at most one room.                                   |
 | Bulb     | One light with a stable id (`wiz:<mac>`, `hue:<bridge>:<light>`, …). In one room or none, at one position. |
-| Position | `left`, `center`, `right`, `surround-left`, `surround-right`, `ambient`.                                  |
-| Layout   | Ambient; 2.0 = L R; 3.0 = L C R; 5.0 = L C R SL SR. Declared by the track (`channel_layout`, FP-2).       |
-| Channel  | Part of a track. Represents a position (`spatial_hint`), never a bulb.                                    |
+| Position | `left`, `center`, `right`, `surround-left`, `surround-right`, `ambient`.                                   |
+| Layout   | Ambient; 2.0 = L R; 3.0 = L C R; 5.0 = L C R SL SR. Declared by the track (`channel_layout`, FP-2).        |
+| Channel  | Part of a track. Represents a position (`spatial_hint`), never a bulb.                                     |
 
 Routing joins them: **fold-down** when a room has no bulb for a channel's position (SL→L, SR→R, C→L and R, anything→Ambient bulbs→every bulb), **fill** when a bulb's position has no channel (C←L+R mix, SL←L, SR←R, Ambient←mix of all), **mixing** when a bulb gets several channels (max brightness, brightness-weighted color), and a per-bulb **Follows** override. The exact tables are in the Studio J1 spec and the shared fixture `tests/fixtures/routing/cases.json`. Routing has **one implementation** (`RoomRouter`, proposed) used by playback and by preview. Studio never re-implements it.
 
@@ -79,23 +80,23 @@ Key facts:
 
 ## 6. Repository layout
 
-| Path                                  | What                                                                                     |
-| ------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `src/OpenLightFX.Emby/Api/`           | ServiceStack services: `StudioService`, `StudioAssetService`, `TrackService`, `DiscoveryService`, `LightTracksPage`. |
-| `src/OpenLightFX.Emby/Studio/`        | Studio hosting, auth tickets, edit proxy, preview host, track files, sidecar.            |
-| `src/OpenLightFX.Emby/Engine/`        | `PlaybackSession`, `ChannelManager`, `InterpolationEngine`.                              |
-| `src/OpenLightFX.Emby/Effects/`       | 13 effect renderers and the photosensitivity filter.                                     |
-| `src/OpenLightFX.Emby/Drivers/`       | `IBulbDriver` per protocol, `BulbDriverFactory`, Hue pairing.                             |
-| `src/OpenLightFX.Emby/Discovery/`     | Per-protocol discovery, coordinator, in-memory store, identify.                         |
-| `src/OpenLightFX.Emby/Configuration/` | `PluginOptions` (Emby generic settings editor) and playback setting parsing.                 |
-| `src/OpenLightFX.Emby/Services/`      | Track discovery, parsing/validation, selection.                                          |
-| `src/OpenLightFX.Emby/Models/`        | Bulb configs (polymorphic on `protocol`), transient channel mapping, track info.          |
-| `src/OpenLightFX.Emby/Rooms/`         | Room storage, stable bulb ids, and position-based playback mapping.                        |
-| `tests/OpenLightFX.Emby.Tests/`       | xUnit. `Fixtures/sampling` is a byte-for-byte copy of Studio's shared fixtures (`SOURCE` names the commit). |
-| `docs/design/`                        | Design docs. `rooms-api.md` is the J1 plugin design.                                     |
-| `scripts/fetch-sdk.sh`                | Puts Emby 4.9.3.0 SDK DLLs in `lib/` (from the Docker image, else the official .deb).    |
-| `scripts/deploy.sh`                   | Empoweres an agent to deploy for testing.                                                |
-| `scripts/analyze-playback.py`, `.github/skills/` | Owner's log-analysis helper.                                                   |
+| Path                                             | What                                                                                                                 |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `src/OpenLightFX.Emby/Api/`                      | ServiceStack services: `StudioService`, `StudioAssetService`, `TrackService`, `DiscoveryService`, `LightTracksPage`. |
+| `src/OpenLightFX.Emby/Studio/`                   | Studio hosting, auth tickets, edit proxy, preview host, track files, sidecar.                                        |
+| `src/OpenLightFX.Emby/Engine/`                   | `PlaybackSession`, `ChannelManager`, `InterpolationEngine`.                                                          |
+| `src/OpenLightFX.Emby/Effects/`                  | 13 effect renderers and the photosensitivity filter.                                                                 |
+| `src/OpenLightFX.Emby/Drivers/`                  | `IBulbDriver` per protocol, `BulbDriverFactory`, Hue pairing.                                                        |
+| `src/OpenLightFX.Emby/Discovery/`                | Per-protocol discovery, coordinator, in-memory store, identify.                                                      |
+| `src/OpenLightFX.Emby/Configuration/`            | `PluginOptions` (Emby generic settings editor) and playback setting parsing.                                         |
+| `src/OpenLightFX.Emby/Services/`                 | Track discovery, parsing/validation, selection.                                                                      |
+| `src/OpenLightFX.Emby/Models/`                   | Bulb configs (polymorphic on `protocol`), transient channel mapping, track info.                                     |
+| `src/OpenLightFX.Emby/Rooms/`                    | Room storage, stable bulb ids, and position-based playback mapping.                                                  |
+| `tests/OpenLightFX.Emby.Tests/`                  | xUnit. `Fixtures/sampling` is a byte-for-byte copy of Studio's shared fixtures (`SOURCE` names the commit).          |
+| `docs/design/`                                   | Design docs. `rooms-api.md` is the J1 plugin design.                                                                 |
+| `scripts/fetch-sdk.sh`                           | Puts Emby 4.9.3.0 SDK DLLs in `lib/` (from the Docker image, else the official .deb).                                |
+| `scripts/deploy.sh`                              | Empoweres an agent to deploy for testing.                                                                            |
+| `scripts/analyze-playback.py`, `.github/skills/` | Owner's log-analysis helper.                                                                                         |
 
 ## 7. Running things
 
@@ -128,4 +129,3 @@ It boots Emby 4.9.3.0 in Docker on `localhost:8096` (`docker-compose.fullstack.y
 6. Pasted bulb JSON, mapping profiles, and per-device profile overrides are unsupported. Existing `.lightfx` tracks and track selections remain supported.
 
 "All tests pass" is necessary, not sufficient.
-

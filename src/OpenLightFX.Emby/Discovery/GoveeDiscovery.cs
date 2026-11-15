@@ -43,29 +43,8 @@ public class GoveeDiscovery : IDiscoveryModule
 
                 var result = await receiveTask;
                 var json = Encoding.UTF8.GetString(result.Buffer);
-                var obj = JsonNode.Parse(json)?.AsObject();
-                var msg = obj?["msg"]?.AsObject();
-                if (msg == null) continue;
-
-                var cmd = msg["cmd"]?.GetValue<string>();
-                if (cmd != "scan") continue;
-
-                var data = msg["data"]?.AsObject();
-                if (data == null) continue;
-
-                var ipStr = data["ip"]?.GetValue<string>() ?? result.RemoteEndPoint.Address.ToString();
-                var device = data["device"]?.GetValue<string>();
-                var sku = data["sku"]?.GetValue<string>();
-
-                bulbs.Add(new DiscoveredBulb
-                {
-                    IpAddress = IPAddress.Parse(ipStr),
-                    Port = ControlPort,
-                    Protocol = BulbProtocol.Govee,
-                    MacAddress = null,
-                    Model = sku,
-                    Name = device
-                });
+                if (ParseScanResponse(json, result.RemoteEndPoint.Address) is { } bulb)
+                    bulbs.Add(bulb);
             }
             catch (SocketException) { break; }
             catch (OperationCanceledException) { break; }
@@ -73,5 +52,34 @@ public class GoveeDiscovery : IDiscoveryModule
         }
 
         return bulbs;
+    }
+
+    public static DiscoveredBulb? ParseScanResponse(string json, IPAddress sourceAddress)
+    {
+        try
+        {
+            var obj = JsonNode.Parse(json)?.AsObject();
+            var msg = obj?["msg"]?.AsObject();
+            if (msg?["cmd"]?.GetValue<string>() != "scan") return null;
+            var data = msg["data"]?.AsObject();
+            if (data == null) return null;
+            var ipStr = data["ip"]?.GetValue<string>() ?? sourceAddress.ToString();
+            var device = data["device"]?.GetValue<string>();
+            var sku = data["sku"]?.GetValue<string>();
+            return new DiscoveredBulb
+            {
+                IpAddress = IPAddress.Parse(ipStr),
+                Port = ControlPort,
+                Protocol = BulbProtocol.Govee,
+                MacAddress = null,
+                HardwareId = string.IsNullOrWhiteSpace(device) ? null : device.Trim(),
+                Model = sku,
+                Name = string.IsNullOrWhiteSpace(sku) ? "Govee bulb" : $"Govee {sku}"
+            };
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

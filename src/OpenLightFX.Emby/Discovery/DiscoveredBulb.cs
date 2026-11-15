@@ -18,6 +18,8 @@ public class DiscoveredBulb
     public BulbProtocol Protocol { get; set; } = BulbProtocol.Unknown;
 
     public string? MacAddress { get; set; }
+    /// <summary>A protocol-provided stable device identifier that is not necessarily a MAC address.</summary>
+    public string? HardwareId { get; set; }
     public string? Model { get; set; }
     public string? Name { get; set; }
     public DateTime DiscoveredAt { get; set; } = DateTime.UtcNow;

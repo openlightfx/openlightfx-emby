@@ -196,6 +196,10 @@ public class StudioBulbResponse
     [DataMember(Name = "lastSeenAt")]
     [JsonPropertyName("lastSeenAt")]
     public string? LastSeenAt { get; set; }
+
+    [DataMember(Name = "isNamed")]
+    [JsonPropertyName("isNamed")]
+    public bool IsNamed { get; set; }
 }
 
 [DataContract]
@@ -428,35 +432,15 @@ public class StudioService : IService, IRequiresRequest
         return new StudioSessionResponse { AccessToken = token };
     }
 
-    public async Task<object> Get(GetStudioBulbs request)
+    public object Get(GetStudioBulbs request)
     {
-        var known = ServerEntryPoint.Instance?.RoomStore.Bulbs;
-        if (known is { Count: > 0 })
-            return known.Select(b => new StudioBulbResponse
-            {
-                Id = b.Id, Name = b.Name, Protocol = b.Config.Protocol.ToString().ToLowerInvariant(),
-                IpAddress = b.Config.IpAddress?.ToString(), Model = b.Config.Model, RoomId = b.RoomId,
-                Position = b.Position, Follows = b.Follows, LastSeenAt = b.LastSeenAt
-            }).ToList();
-        var bulbs = LoadBulbs();
-        var response = new List<StudioBulbResponse>(bulbs.Count);
-        foreach (var bulb in bulbs)
+        var known = ServerEntryPoint.Instance?.RoomStore.Bulbs ?? Array.Empty<KnownBulbRecord>();
+        return known.Select(b => new StudioBulbResponse
         {
-            var caps = await StudioBulbCapabilities.ReadAsync(bulb).ConfigureAwait(false);
-            response.Add(new StudioBulbResponse
-            {
-                Id = bulb.Id,
-                Name = string.IsNullOrEmpty(bulb.Name) ? bulb.Id : bulb.Name,
-                Protocol = bulb.Protocol.ToString(),
-                Capabilities = new StudioBulbCapabilitiesResponse
-                {
-                    Rgb = caps.SupportsRgb,
-                    MinTransitionMs = (int)caps.MinTransitionMs
-                }
-            });
-        }
-
-        return response;
+            Id = b.Id, Name = b.Name, Protocol = b.Config.Protocol.ToString().ToLowerInvariant(),
+            IpAddress = b.Config.IpAddress?.ToString(), Model = b.Config.Model, RoomId = b.RoomId,
+            Position = b.Position, Follows = b.Follows, LastSeenAt = b.LastSeenAt, IsNamed = b.IsNamed
+        }).ToList();
     }
 
     public object Get(GetStudioItems request)

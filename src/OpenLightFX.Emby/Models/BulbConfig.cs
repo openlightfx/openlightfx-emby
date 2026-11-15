@@ -26,6 +26,8 @@ public abstract class BulbConfig
 
     public int Port { get; set; }
     public string? MacAddress { get; set; }
+    /// <summary>A protocol-provided stable device identifier that is not necessarily a MAC address.</summary>
+    public string? HardwareId { get; set; }
     public string? Model { get; set; }
 
     // Capability overrides (null = use protocol defaults)

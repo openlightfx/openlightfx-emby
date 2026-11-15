@@ -1,6 +1,7 @@
 namespace OpenLightFX.Emby.Discovery;
 
 using OpenLightFX.Emby.Models;
+using OpenLightFX.Emby.Rooms;
 
 public class DiscoveryCoordinator
 {
@@ -66,10 +67,13 @@ public class DiscoveryCoordinator
 
         foreach (var bulb in bulbs)
         {
-            // Deduplicate by MAC address first, then by IP+Protocol
-            var key = !string.IsNullOrEmpty(bulb.MacAddress)
-                ? $"mac:{bulb.MacAddress.ToUpperInvariant()}"
-                : $"ip:{bulb.IpAddress}:{bulb.Protocol}";
+            // Identity is protocol-scoped: different protocols may report the same MAC,
+            // while Govee's LAN `device` value is a stable identifier but not necessarily a MAC.
+            var key = !string.IsNullOrWhiteSpace(bulb.MacAddress)
+                ? $"mac:{bulb.Protocol}:{StableBulbId.NormalizeHardwareId(bulb.MacAddress)}"
+                : !string.IsNullOrWhiteSpace(bulb.HardwareId)
+                    ? $"hardware:{bulb.Protocol}:{StableBulbId.NormalizeHardwareId(bulb.HardwareId)}"
+                    : $"ip:{bulb.Protocol}:{bulb.IpAddress}";
 
             if (seen.Add(key))
                 result.Add(bulb);

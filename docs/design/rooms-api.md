@@ -61,11 +61,13 @@ One file, `{IApplicationPaths.DataPath}/OpenLightFX/rooms.json`, next to `track-
       "roomId": "r_6f2c1a",
       "position": "left",
       "follows": null,
+      "isNamed": true,
       "config": {
         "protocol": "Wiz",
         "ipAddress": "192.168.1.40",
         "port": 38899,
         "macAddress": "A8:BB:50:C3:D2:01",
+        "hardwareId": null,
         "model": "ESP01_SHRGB1C_31"
       },
       "lastSeenAt": "2026-11-13T13:58:00.000Z"
@@ -74,7 +76,7 @@ One file, `{IApplicationPaths.DataPath}/OpenLightFX/rooms.json`, next to `track-
 }
 ```
 
-- `position` is one of `left`, `center`, `right`, `surround-left`, `surround-right`, `ambient`, or null (in the room but not yet placed). `follows` is null (Auto) or one of the same six.
+- `position` is one of `left`, `center`, `right`, `surround-left`, `surround-right`, `ambient`, or null (in the room but not yet placed). `follows` is null (Auto) or one of the same six. `isNamed` records that the person supplied the durable user-facing name; only named bulbs can be assigned to rooms.
 - `config` is the existing `BulbConfig` JSON shape, so `BulbDriverFactory.Create` keeps working. Hue lights carry the bridge key in `config.hueApiKey`. **The key is never returned by any route**; responses use a `BulbDto` that omits it.
 - A bulb's `roomId` null means "known, not in a room". Such bulbs are never driven by playback or preview.
 
@@ -82,11 +84,12 @@ One file, `{IApplicationPaths.DataPath}/OpenLightFX/rooms.json`, next to `track-
 
 Ids must survive rescans and DHCP changes, so they come from hardware identity, not from the scan:
 
-| Protocol         | Id                                           | Notes                                                                 |
-| ---------------- | -------------------------------------------- | --------------------------------------------------------------------- |
-| WiZ, LIFX, Govee | `{protocol}:{mac, lowercase, no separators}` | All three report a MAC in discovery.                                  |
-| Hue              | `hue:{bridgeId}:{lightId}`                   | `bridgeId` from the bridge's `/api/config`; `lightId` from `/lights`. |
-| No MAC           | `{protocol}:ip:{ip}`                         | Fallback; upgraded to the MAC form the first time a scan reports one. |
+| Protocol           | Id                                 | Notes                                                                                                                                                                     |
+| ------------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WiZ, LIFX          | `{protocol}:{normalized MAC}`      | Protocol-scoped hardware MAC identity from discovery.                                                                                                                     |
+| Govee              | `govee:{normalized LAN device id}` | `device` from the LAN scan response. It is not stored as `MacAddress` and may be opaque; validate stability on physical models before claiming universal DHCP resilience. |
+| Hue                | `hue:{bridgeId}:{lightId}`         | `bridgeId` from the bridge's `/api/config`; `lightId` from `/lights`.                                                                                                     |
+| No stable identity | `{protocol}:ip:{ip}`               | Explicit provisional fallback. Upgrade when a stable identity is later reported, preserving the user's name and room assignment.                                          |
 
 On every scan, a discovered bulb whose id matches a known bulb updates that bulb's `ipAddress` and `lastSeenAt` and keeps its name, room, and position.
 
@@ -120,7 +123,7 @@ Studio uses it to choose the first screen (FLOW-001) and enforce administrator-o
 | `PUT /OpenLightFX/Studio/Rooms/{roomId}`    | Same body; replaces the room's name, screen, and bulb set. `If-Match: {updatedAt}` required → 412 `stale` if it differs. A screen or bulb assigned to another room cannot be reassigned. |
 | `DELETE /OpenLightFX/Studio/Rooms/{roomId}` | 204. Its bulbs get `roomId: null`; its screen is free.                                                                                                                                   |
 
-`BulbDto` = `{ id, name, protocol, model, ipAddress, macAddress, roomId, position, follows, capabilities: { rgb, colorTemp, minTransitionMs }, lastSeenAt, reachable }`.
+`BulbDto` = `{ id, name, isNamed, protocol, model, ipAddress, macAddress, roomId, position, follows, capabilities: { rgb, colorTemp, minTransitionMs }, lastSeenAt, reachable }`. The plugin does not expose `hardwareId`; it is only used for local identity reconciliation.
 
 ### Devices (screens)
 
@@ -144,13 +147,13 @@ Source: Emby's `IDeviceManager.GetDevices(new DeviceQuery())` (present in the 4.
 
 ### Bulbs
 
-| Route                                              | Body / result                                                                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /OpenLightFX/Studio/Discover`                | `{ timeoutMs?: 5000 }` → `{ bulbs: [BulbDto] }`. Runs discovery for supported WiZ, LIFX, and Govee bulbs, assigns stable ids, merges with known bulbs (updating IP and `lastSeenAt`), and persists new bulbs as known-not-in-a-room so Identify and Rename work on them. One scan at a time: a second call while one runs → 409 `discovery_running`. |
-| `GET /OpenLightFX/Studio/Bulbs`                    | `[BulbDto]`: every known bulb. Replaces today's response of the same route (Studio is the only caller).                                                                                                                                                                                                                                              |
-| `PUT /OpenLightFX/Studio/Bulbs/{bulbId}`           | `{ name }` → BulbDto. Room and position change only through the room routes, so a room write is the single place membership changes.                                                                                                                                                                                                                 |
-| `DELETE /OpenLightFX/Studio/Bulbs/{bulbId}`        | Forget a bulb that is in no room. 409 `in_room` otherwise.                                                                                                                                                                                                                                                                                           |
-| `POST /OpenLightFX/Studio/Bulbs/{bulbId}/Identify` | → `{ durationMs: 1500 }` after the flash. Uses `BulbDriverFactory.Create(config)` on the known bulb, so it works for placed bulbs and after rescans, then restores the previous state when the driver can read it. 409 `preview_active` or `playback_active` if the bulb is in use; 504 `no_answer` if the driver gets no response.                  |
+| Route                                              | Body / result                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /OpenLightFX/Studio/Discover`                | `{ timeoutMs?: 5000 }` → `{ bulbs: [BulbDto] }`. Runs discovery for supported WiZ, LIFX, and Govee bulbs, assigns stable ids, merges with known bulbs (updating IP and `lastSeenAt`), and persists new bulbs as unnamed and not-in-a-room. It never replaces a user name or room assignment. One scan at a time: a second call while one runs → 409 `discovery_running`. |
+| `GET /OpenLightFX/Studio/Bulbs`                    | `[BulbDto]`: every known bulb, including unnamed and room-assigned inventory. The response includes `isNamed`.                                                                                                                                                                                                                                                           |
+| `PUT /OpenLightFX/Studio/Bulbs/{bulbId}`           | `{ name }` → BulbDto. Saves the user name and sets `isNamed: true`; room and position change only through the room routes.                                                                                                                                                                                                                                               |
+| `DELETE /OpenLightFX/Studio/Bulbs/{bulbId}`        | Forget a bulb that is in no room. 409 `in_room` otherwise.                                                                                                                                                                                                                                                                                                               |
+| `POST /OpenLightFX/Studio/Bulbs/{bulbId}/Identify` | → `{ durationMs: 1500 }` after the flash. Uses `BulbDriverFactory.Create(config)` on the known bulb, so it works for placed bulbs and after rescans, then restores the previous state when the driver can read it. 409 `preview_active` or `playback_active` if the bulb is in use; 504 `no_answer` if the driver gets no response.                                      |
 
 ### Routing
 
@@ -246,9 +249,9 @@ Wireframe: Studio `docs/journeys/wireframes/07-plugin-settings.png`.
 
 ## Tests
 
-- **Unit (xUnit, `tests/OpenLightFX.Emby.Tests`)**: `RoomRouterTests` and `BulbMixerTests` over the shared routing fixture; `StableBulbIdTests`; `RoomStoreTests` (atomic write, `If-Match`, one room per bulb and per device); `TrackLayoutTests` (inference on a copy of John Wick's channel list, V-022/V-023).
+- **Unit (xUnit, `tests/OpenLightFX.Emby.Tests`)**: `RoomRouterTests` and `BulbMixerTests` over the shared routing fixture; `StableBulbIdTests`; Govee scan parsing and hardware-ID tests; `RoomStoreTests` (atomic write, `If-Match`, name-before-placement, forget protection, legacy identity upgrade including room-reference rewrite, and IP refresh preserving custom names); `TrackLayoutTests` (inference on a copy of John Wick's channel list, V-022/V-023).
 - **Shared fixtures**: `tests/fixtures/routing/cases.json` is authored in the Studio repo and copied byte-for-byte here, as `tests/fixtures/sampling` already is. A test fails if the copies differ in `SOURCE`.
-- **Full stack** (Studio repo, `OLFX_FULLSTACK_REQUIRE=1 npm run test:fullstack`): discovery and Identify against the simulator's NDJSON, room CRUD, preview through a room, and Emby playback on a device assigned to a room and one that is not.
+- **Full stack** (Studio repo, `OLFX_FULLSTACK_REQUIRE=1 npm run test:fullstack`): Bulbs-page discovery and Identify against the simulator's NDJSON, name/forget persistence, room CRUD, preview through a room, and Emby playback on a device assigned to a room and one that is not. Add a Govee rediscovery case that restarts/reconfigures the simulator with the same stable `device` identity at a new IP and asserts ID, name, and room placement are preserved while the IP updates. The simulator already emulates Govee LAN scan responses and UDP 4003 commands; this case may need lab orchestration changes, not a new protocol emulator.
 
 ## Risks and things to verify on the full stack
 

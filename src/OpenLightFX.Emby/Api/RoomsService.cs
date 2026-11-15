@@ -59,6 +59,9 @@ public sealed class DiscoverStudioBulbs : IReturn<StudioDiscoveryDto> { }
 [Route("/OpenLightFX/Studio/Bulbs/{BulbId}", "PUT")]
 [Authenticated(Roles = "Admin")]
 public sealed class RenameStudioBulb : IReturn<StudioBulbDto> { public string BulbId { get; set; } = ""; public string Name { get; set; } = ""; }
+[Route("/OpenLightFX/Studio/Bulbs/{BulbId}", "DELETE")]
+[Authenticated(Roles = "Admin")]
+public sealed class ForgetStudioBulb { public string BulbId { get; set; } = ""; }
 [Route("/OpenLightFX/Studio/Bulbs/{BulbId}/Identify", "POST")]
 [Authenticated(Roles = "Admin")]
 public sealed class IdentifyStudioBulb { public string BulbId { get; set; } = ""; }
@@ -143,6 +146,7 @@ public sealed class StudioBulbDto
     [DataMember(Name = "position"), JsonPropertyName("position")] public string? Position { get; set; }
     [DataMember(Name = "follows"), JsonPropertyName("follows")] public string? Follows { get; set; }
     [DataMember(Name = "lastSeenAt"), JsonPropertyName("lastSeenAt")] public string? LastSeenAt { get; set; }
+    [DataMember(Name = "isNamed"), JsonPropertyName("isNamed")] public bool IsNamed { get; set; }
 }
 [DataContract]
 public sealed class StudioDeviceDto
@@ -269,7 +273,7 @@ public sealed class RoomsService : IService, IRequiresRequest
                 _ => new RestBulbConfig()
             };
             config.Id = bulb.Id; config.Name = bulb.Name ?? bulb.Protocol.ToString(); config.IpAddress = bulb.IpAddress;
-            config.Port = bulb.Port; config.MacAddress = bulb.MacAddress; config.Model = bulb.Model;
+            config.Port = bulb.Port; config.MacAddress = bulb.MacAddress; config.HardwareId = bulb.HardwareId; config.Model = bulb.Model;
             entry.RoomStore.UpsertBulb(config);
         }
         return new StudioDiscoveryDto
@@ -285,11 +289,17 @@ public sealed class RoomsService : IService, IRequiresRequest
         catch (RoomStoreException ex) { throw Error(ex); }
     }
 
+    public object Delete(ForgetStudioBulb request)
+    {
+        try { Entry.RoomStore.ForgetBulb(request.BulbId); return new { success = true }; }
+        catch (RoomStoreException ex) { throw Error(ex); }
+    }
+
     public object Post(IdentifyStudioBulb request)
     {
         var record = Entry.RoomStore.FindBulb(request.BulbId) ?? throw new ArgumentException("bulb_not_found: Bulb not found.");
         var config = record.Config;
-        var discovered = new DiscoveredBulb { Id = request.BulbId, IpAddress = config.IpAddress, Port = config.Port, Protocol = config.Protocol, MacAddress = config.MacAddress, Model = config.Model, Name = record.Name };
+        var discovered = new DiscoveredBulb { Id = request.BulbId, IpAddress = config.IpAddress, Port = config.Port, Protocol = config.Protocol, MacAddress = config.MacAddress, HardwareId = config.HardwareId, Model = config.Model, Name = record.Name };
         try { Entry.IdentifyService.IdentifyAsync(discovered).GetAwaiter().GetResult(); return new { durationMs = 1500 }; }
         catch { throw new InvalidOperationException("no_answer: The bulb did not respond to Identify."); }
     }
@@ -318,5 +328,5 @@ public sealed class RoomsService : IService, IRequiresRequest
         var layout = placements.Contains("surround-left") || placements.Contains("surround-right") ? "LAYOUT_5_0" : placements.Contains("center") ? "LAYOUT_3_0" : placements.Contains("left") || placements.Contains("right") ? "LAYOUT_2_0" : "LAYOUT_AMBIENT";
         return new StudioRoomDto { Id = room.Id, Name = room.Name, Screen = new StudioScreenDto { DeviceId = room.Screen.DeviceId, DeviceName = room.Screen.DeviceName, AppName = room.Screen.AppName }, Bulbs = room.Bulbs.Select(x => new StudioRoomBulbDto { Id = x.Id, Position = x.Position, Follows = x.Follows }).ToList(), UpdatedAt = room.UpdatedAt, SuggestedLayout = layout };
     }
-    private static StudioBulbDto MapBulb(KnownBulbRecord bulb) => new() { Id = bulb.Id, Name = bulb.Name, Protocol = bulb.Config.Protocol.ToString().ToLowerInvariant(), Model = bulb.Config.Model, IpAddress = bulb.Config.IpAddress?.ToString(), RoomId = bulb.RoomId, Position = bulb.Position, Follows = bulb.Follows, LastSeenAt = bulb.LastSeenAt };
+    private static StudioBulbDto MapBulb(KnownBulbRecord bulb) => new() { Id = bulb.Id, Name = bulb.Name, Protocol = bulb.Config.Protocol.ToString().ToLowerInvariant(), Model = bulb.Config.Model, IpAddress = bulb.Config.IpAddress?.ToString(), RoomId = bulb.RoomId, Position = bulb.Position, Follows = bulb.Follows, LastSeenAt = bulb.LastSeenAt, IsNamed = bulb.IsNamed };
 }
