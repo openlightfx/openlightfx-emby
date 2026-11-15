@@ -1,8 +1,8 @@
 # AGENTS.md — OpenLightFX Emby plugin
 
-Read this whole file before you change anything, then the design doc for your task. If a task brief and this file disagree, stop and ask.
+Read this whole file before you change anything.
 
-The companion repository is [openlightfx/openlightfx-studio](https://github.com/openlightfx/openlightfx-studio): the track editor this plugin hosts. Its `AGENTS.md` and `docs/journeys/J1-first-light.md` define the product journey; read at least the journey summary there.
+The companion repository is [openlightfx/openlightfx-studio](https://github.com/openlightfx/openlightfx-studio): the track editor this plugin hosts. Its `AGENTS.md` describes the companion Studio project.
 
 ## 1. What OpenLightFX is for
 
@@ -20,7 +20,7 @@ The last Studio rebuild was test-green and unusable, because screens were built 
 
 ## 3. The journey, from the plugin's side
 
-J1 — First light (spec in the Studio repo):
+First light:
 
 | Step                 | Plugin work                                                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -31,7 +31,7 @@ J1 — First light (spec in the Studio repo):
 | 5. Edit              | Edit-proxy video and MediaInfo, tone-mapped Frame, live preview through a room using the same routing as playback.           |
 | 6. Watch in Emby     | Deferred and incomplete: set the movie's active track; on Emby playback, resolve device → room → bulbs → routing and play.   |
 
-Design for steps 1, 4 (preview), and 5: [`docs/design/rooms-api.md`](docs/design/rooms-api.md).
+
 
 ## 4. Domain model
 
@@ -44,7 +44,7 @@ Design for steps 1, 4 (preview), and 5: [`docs/design/rooms-api.md`](docs/design
 | Layout   | Ambient; 2.0 = L R; 3.0 = L C R; 5.0 = L C R SL SR. Declared by the track (`channel_layout`, FP-2).        |
 | Channel  | Part of a track. Represents a position (`spatial_hint`), never a bulb.                                     |
 
-Routing joins them: **fold-down** when a room has no bulb for a channel's position (SL→L, SR→R, C→L and R, anything→Ambient bulbs→every bulb), **fill** when a bulb's position has no channel (C←L+R mix, SL←L, SR←R, Ambient←mix of all), **mixing** when a bulb gets several channels (max brightness, brightness-weighted color), and a per-bulb **Follows** override. The exact tables are in the Studio J1 spec and the shared fixture `tests/fixtures/routing/cases.json`. Routing has **one implementation** (`RoomRouter`, proposed) used by playback and by preview. Studio never re-implements it.
+Routing joins them: **fold-down** when a room has no bulb for a channel's position (SL→L, SR→R, C→L and R, anything→Ambient bulbs→every bulb), **fill** when a bulb's position has no channel (C←L+R mix, SL←L, SR←R, Ambient←mix of all), **mixing** when a bulb gets several channels (max brightness, brightness-weighted color), and a per-bulb **Follows** override. The shared fixture is `tests/fixtures/routing/cases.json`. Routing has **one implementation** (`RoomRouter`, proposed) used by playback and by preview. Studio never re-implements it.
 
 Pasted bulb JSON, mapping profiles, active profile names, and device-profile overrides are removed. Playback uses a room selected by the Emby device; no legacy settings fallback or import exists.
 
@@ -64,7 +64,7 @@ Emby playback events (ISessionManager)
 Studio (static SPA, embedded zip) ← StudioAssetService at /emby/OpenLightFX/studio/
 Studio API ← StudioService at /OpenLightFX/Studio/*
   Items, MediaInfo, Proxy (+ Proxy/Media), Frame, Tracks, Projects, Preview/Start|Frame|Stop
-  [J1] Setup, Rooms, Devices, Discover, Bulbs, Identify, Hue/Pair, Routing, ActiveTrack
+  Setup adds Rooms, Devices, Discover, Bulbs, Identify, Hue/Pair, Routing, ActiveTrack
 ```
 
 Key facts:
@@ -76,7 +76,7 @@ Key facts:
 - **Edit proxy.** `StudioProxyJob` encodes H.264 fragmented MP4 (GOP ≤ 500 ms) with Emby's ffmpeg; `StudioGrowingStream` serves it with HTTP Range while it grows; MediaInfo reports `missing | building (encodedThroughMs) | ready | failed (reason)`. Emby's ffmpeg has no zscale; the Frame endpoint tonemaps with `tonemap=hable` and falls back to Emby's tonemap filter. Uses ffprobe.
 - **Saving.** `PUT /OpenLightFX/Studio/Tracks/{trackId}` validates with `TrackParser` (V- codes) and writes `{movieDir}/lightfx/{trackId}.lightfx`; `If-Match` = `updatedAt`, 409 only when the file exists and differs. Sidecar `{trackId}.studio.json` next to it.
 - **Preview** (`StudioPreviewHost`) shares drivers with playback and is mutually exclusive with it: start returns 409 `playback_active` unless `takeover`. Stop restores bulb state.
-- **Proto.** `src/OpenLightFX.Emby/Proto/lightfx.proto` must stay byte-identical to Studio's `proto/lightfx.proto`. Changes are proposed in Studio's `docs/requirements/format-proposals.md` first.
+- **Proto.** `src/OpenLightFX.Emby/Proto/lightfx.proto` must stay byte-identical to Studio's `proto/lightfx.proto`. Changes must be coordinated with the Studio implementation.
 
 ## 6. Repository layout
 
@@ -93,7 +93,7 @@ Key facts:
 | `src/OpenLightFX.Emby/Models/`                   | Bulb configs (polymorphic on `protocol`), transient channel mapping, track info.                                     |
 | `src/OpenLightFX.Emby/Rooms/`                    | Room storage, stable bulb ids, and position-based playback mapping.                                                  |
 | `tests/OpenLightFX.Emby.Tests/`                  | xUnit. `Fixtures/sampling` is a byte-for-byte copy of Studio's shared fixtures (`SOURCE` names the commit).          |
-| `docs/design/`                                   | Design docs. `rooms-api.md` is the J1 plugin design.                                                                 |
+
 | `scripts/fetch-sdk.sh`                           | Puts Emby 4.9.3.0 SDK DLLs in `lib/` (from the Docker image, else the official .deb).                                |
 | `scripts/deploy.sh`                              | Empoweres an agent to deploy for testing.                                                                            |
 | `scripts/analyze-playback.py`, `.github/skills/` | Owner's log-analysis helper.                                                                                         |
@@ -121,7 +121,7 @@ It boots Emby 4.9.3.0 in Docker on `localhost:8096` (`docker-compose.fullstack.y
 
 ## 8. Definition of done
 
-1. The behavior is in an approved spec (Studio `docs/journeys/…` or `docs/requirements/studio-requirements.md`) or design doc here, and the PR names the requirement IDs.
+1. The behavior and affected requirement IDs are clear in the change and its tests.
 2. `dotnet test -c Release` passes. Pure logic (routing, mixing, ids, validation) has unit tests over shared fixtures, copied byte-for-byte from the Studio repo.
 3. The full stack passes with this branch (`OLFX_EMBY_BRANCH`), in Chromium and Firefox, against real Emby and the simulator. For anything the user sees, the Studio walkthrough video for that step has been recorded and watched.
 4. No test is skipped, loosened, or listed as an expected failure to hide a real bug. No "works on mocks only".

@@ -7,7 +7,7 @@ description: Build and deploy the checked-out OpenLightFX plugin with the adjace
 
 This deploy replaces the Emby plugin DLL and restarts Emby. Run it only when the user asks for a deployment or refresh; do not deploy merely because a build passed.
 
-1. Read this repository's `AGENTS.md` and the Studio repository's `AGENTS.md` plus the relevant J1 journey section. Check both worktrees with `git status --short` and `git branch --show-current`. Preserve local changes and the current branches; do not stash, reset, switch branches, or commit.
+1. Read this repository's `AGENTS.md` and the Studio repository's `AGENTS.md`. Check both worktrees with `git status --short` and `git branch --show-current`. Preserve local changes and the current branches; do not stash, reset, switch branches, or commit.
 2. The script builds Studio from `STUDIO_REPO` (default: sibling `../openlightfx-studio`), zips that build into the plugin's ignored `obj/studio-dist` cache, builds the checked-out plugin, merges `Google.Protobuf`, backs up the old remote DLL, deploys, and restarts Emby. It deliberately does not use a Studio release asset.
 3. Preview the build/dependency steps without contacting the server:
 
