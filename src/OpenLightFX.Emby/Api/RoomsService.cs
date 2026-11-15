@@ -300,7 +300,7 @@ public sealed class RoomsService : IService, IRequiresRequest
         var record = Entry.RoomStore.FindBulb(request.BulbId) ?? throw new ArgumentException("bulb_not_found: Bulb not found.");
         var config = record.Config;
         var discovered = new DiscoveredBulb { Id = request.BulbId, IpAddress = config.IpAddress, Port = config.Port, Protocol = config.Protocol, MacAddress = config.MacAddress, HardwareId = config.HardwareId, Model = config.Model, Name = record.Name };
-        try { Entry.IdentifyService.IdentifyAsync(discovered).GetAwaiter().GetResult(); return new { durationMs = 1500 }; }
+        try { var durationMs = Entry.IdentifyService.IdentifyAsync(discovered).GetAwaiter().GetResult(); return new { durationMs }; }
         catch { throw new InvalidOperationException("no_answer: The bulb did not respond to Identify."); }
     }
 

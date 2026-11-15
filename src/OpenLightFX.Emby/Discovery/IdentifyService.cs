@@ -7,20 +7,16 @@ using System.Text.Json.Nodes;
 using OpenLightFX.Emby.Models;
 
 /// <summary>
-/// Sends visual identification sequences to discovered bulbs.
+/// Identifies discovered bulbs by turning them off and on twice.
 /// </summary>
 public class IdentifyService
 {
-    private static readonly (byte R, byte G, byte B)[] IdentifyColors = new[]
-    {
-        ((byte)255, (byte)0, (byte)0),     // Red
-        ((byte)0, (byte)255, (byte)0),     // Green
-        ((byte)0, (byte)0, (byte)255),     // Blue
-    };
+    private const int PowerPhaseMs = 500;
+    private const int IdentifyDurationMs = PowerPhaseMs * 4;
+    private static readonly bool[] IdentifyPowerStates = [false, true, false, true];
 
     /// <summary>
-    /// Run identification sequence. Returns estimated duration in ms.
-    /// Saves and restores bulb state.
+    /// Run the identification sequence. Returns its estimated duration in ms.
     /// </summary>
     public async Task<int> IdentifyAsync(DiscoveredBulb bulb)
     {
@@ -50,13 +46,13 @@ public class IdentifyService
         }
         catch { }
 
-        // Flash RGB 3 times (500ms each)
-        foreach (var (r, g, b) in IdentifyColors)
+        // Turn off and on twice without changing the saved color or brightness.
+        foreach (var isOn in IdentifyPowerStates)
         {
             var payload = Encoding.UTF8.GetBytes(
-                $"{{\"method\":\"setPilot\",\"params\":{{\"r\":{r},\"g\":{g},\"b\":{b},\"dimming\":100,\"state\":true}}}}");
+                $"{{\"method\":\"setPilot\",\"params\":{{\"state\":{isOn.ToString().ToLowerInvariant()}}}}}");
             await client.SendAsync(payload, payload.Length, endpoint);
-            await Task.Delay(500);
+            await Task.Delay(PowerPhaseMs);
         }
 
         // Restore state if we captured it
@@ -81,7 +77,7 @@ public class IdentifyService
             catch { }
         }
 
-        return 1500;
+        return IdentifyDurationMs;
     }
 
     private async Task<int> IdentifyHue(DiscoveredBulb bulb)
@@ -103,16 +99,15 @@ public class IdentifyService
         var endpoint = new IPEndPoint(bulb.IpAddress, bulb.Port);
         using var client = new UdpClient();
 
-        // Flash RGB 3 times using LIFX SetColor (type 102)
-        foreach (var (r, g, b) in IdentifyColors)
+        // Turn off and on twice using LIFX SetPower (type 117).
+        foreach (var isOn in IdentifyPowerStates)
         {
-            var (hue, sat, bri) = RgbToLifxHsbk(r, g, b);
-            var packet = BuildLifxSetColor(hue, sat, bri, 3500, 0);
+            var packet = BuildLifxSetPower(isOn);
             await client.SendAsync(packet, packet.Length, endpoint);
-            await Task.Delay(500);
+            await Task.Delay(PowerPhaseMs);
         }
 
-        return 1500;
+        return IdentifyDurationMs;
     }
 
     private async Task<int> IdentifyGovee(DiscoveredBulb bulb)
@@ -120,63 +115,34 @@ public class IdentifyService
         var endpoint = new IPEndPoint(bulb.IpAddress, 4003);
         using var client = new UdpClient();
 
-        // Flash RGB 3 times
-        foreach (var (r, g, b) in IdentifyColors)
+        // Turn off and on twice without changing the saved color or brightness.
+        foreach (var isOn in IdentifyPowerStates)
         {
             var payload = Encoding.UTF8.GetBytes(
-                $"{{\"msg\":{{\"cmd\":\"colorwc\",\"data\":{{\"color\":{{\"r\":{r},\"g\":{g},\"b\":{b}}},\"colorTemInKelvin\":0}}}}}}");
+                $"{{\"msg\":{{\"cmd\":\"turn\",\"data\":{{\"value\":{(isOn ? 1 : 0)}}}}}}}");
             await client.SendAsync(payload, payload.Length, endpoint);
-            await Task.Delay(500);
+            await Task.Delay(PowerPhaseMs);
         }
 
-        return 1500;
+        return IdentifyDurationMs;
     }
 
-    private static (ushort Hue, ushort Sat, ushort Bri) RgbToLifxHsbk(byte r, byte g, byte b)
+    private static byte[] BuildLifxSetPower(bool on)
     {
-        float rf = r / 255f, gf = g / 255f, bf = b / 255f;
-        float max = Math.Max(rf, Math.Max(gf, bf));
-        float min = Math.Min(rf, Math.Min(gf, bf));
-        float delta = max - min;
-
-        float hue = 0;
-        if (delta > 0)
-        {
-            if (max == rf) hue = 60 * (((gf - bf) / delta) % 6);
-            else if (max == gf) hue = 60 * (((bf - rf) / delta) + 2);
-            else hue = 60 * (((rf - gf) / delta) + 4);
-        }
-        if (hue < 0) hue += 360;
-
-        float sat = max > 0 ? delta / max : 0;
-
-        return (
-            (ushort)(hue / 360f * 65535),
-            (ushort)(sat * 65535),
-            (ushort)(max * 65535)
-        );
-    }
-
-    private static byte[] BuildLifxSetColor(ushort hue, ushort sat, ushort bri, ushort kelvin, uint durationMs)
-    {
-        // LIFX SetColor: type 102, 49 bytes total (36 header + 13 payload)
-        var packet = new byte[49];
+        // LIFX SetPower: type 117, 42 bytes total (36-byte header + 6-byte payload).
+        var packet = new byte[42];
 
         // Frame header
-        BitConverter.GetBytes((ushort)49).CopyTo(packet, 0);
-        BitConverter.GetBytes((ushort)(1024 | 0x2000 | 0x1000)).CopyTo(packet, 2);
+        BitConverter.GetBytes((ushort)42).CopyTo(packet, 0);
+        BitConverter.GetBytes((ushort)(1024 | (1 << 12))).CopyTo(packet, 2);
         BitConverter.GetBytes((uint)2).CopyTo(packet, 4);
 
         // Protocol header
-        BitConverter.GetBytes((ushort)102).CopyTo(packet, 32);
+        BitConverter.GetBytes((ushort)117).CopyTo(packet, 32);
 
-        // Payload: reserved(1) + HSBK(8) + duration(4)
-        packet[36] = 0; // reserved
-        BitConverter.GetBytes(hue).CopyTo(packet, 37);
-        BitConverter.GetBytes(sat).CopyTo(packet, 39);
-        BitConverter.GetBytes(bri).CopyTo(packet, 41);
-        BitConverter.GetBytes(kelvin).CopyTo(packet, 43);
-        BitConverter.GetBytes(durationMs).CopyTo(packet, 45);
+        // Payload: power level (0 or 65535) + duration (0 ms).
+        BitConverter.GetBytes(on ? ushort.MaxValue : (ushort)0).CopyTo(packet, 36);
+        BitConverter.GetBytes(0u).CopyTo(packet, 38);
 
         return packet;
     }
