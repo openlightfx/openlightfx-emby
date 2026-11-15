@@ -12,7 +12,9 @@ public sealed record StudioSourceInfo(
     string AudioCodec,
     bool Hdr,
     string ColorTransfer,
-    double Fps);
+    double Fps,
+    double StartSeconds = 0,
+    int VideoStreamIndex = 0);
 
 public static class StudioFfprobe
 {
@@ -29,6 +31,14 @@ public static class StudioFfprobe
             probedMs = (long)Math.Round(seconds * 1000.0);
         }
 
+        var startSeconds = 0.0;
+        if (root.TryGetProperty("format", out var timing)
+            && timing.TryGetProperty("start_time", out var start)
+            && double.TryParse(start.GetString() ?? start.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedStart)
+            && double.IsFinite(parsedStart))
+            startSeconds = parsedStart;
+        var videoIndex = 0;
+        var streamIndex = 0;
         var width = 0;
         var height = 0;
         var video = "";
@@ -41,8 +51,11 @@ public static class StudioFfprobe
             {
                 var type = stream.TryGetProperty("codec_type", out var codecType) ? codecType.GetString() : null;
                 var name = stream.TryGetProperty("codec_name", out var codecName) ? codecName.GetString() ?? "" : "";
-                if (type == "video" && video.Length == 0)
+                var attachedPicture = stream.TryGetProperty("disposition", out var disposition)
+                    && disposition.TryGetProperty("attached_pic", out var picture) && picture.GetInt32() == 1;
+                if (type == "video" && video.Length == 0 && !attachedPicture)
                 {
+                    videoIndex = stream.TryGetProperty("index", out var index) ? index.GetInt32() : streamIndex;
                     video = name;
                     width = stream.TryGetProperty("width", out var w) ? w.GetInt32() : 0;
                     height = stream.TryGetProperty("height", out var h) ? h.GetInt32() : 0;
@@ -54,11 +67,12 @@ public static class StudioFfprobe
                 {
                     audio = name;
                 }
+                streamIndex++;
             }
         }
 
         var runtime = itemRuntimeMs > 0 ? itemRuntimeMs : probedMs;
-        return new StudioSourceInfo(runtime, width, height, video, audio, IsHdr(transfer), transfer, fps <= 0 ? 24 : fps);
+        return new StudioSourceInfo(runtime, width, height, video, audio, IsHdr(transfer), transfer, fps <= 0 ? 24 : fps, startSeconds, videoIndex);
     }
 
     public static bool IsHdr(string? colorTransfer)
@@ -94,6 +108,8 @@ public static class StudioFfprobe
 public static class StudioProxyPlan
 {
     public const int MaxLongSide = 1280;
+    // Cache markers from older encoders must not revive the AAC-shifted timeline.
+    public const string CacheVersion = "source-timeline-v2";
 
     public static int GopFrames(double fps)
     {
@@ -107,7 +123,7 @@ public static class StudioProxyPlan
 
     public static int IntervalMs(double fps) => IntervalMs(fps < 1 ? 24 : fps, GopFrames(fps));
 
-    public static IReadOnlyList<string> Arguments(string inputPath, string outputPath, double fps)
+    public static IReadOnlyList<string> Arguments(string inputPath, string outputPath, double fps, int? videoStreamIndex = null)
     {
         var gop = GopFrames(fps);
         var scale =
@@ -121,6 +137,8 @@ public static class StudioProxyPlan
         args.AddRange(new[]
         {
             "-i", inputPath,
+            "-map", videoStreamIndex is int index ? $"0:{index}" : "0:v:0",
+            "-map", "0:a:0?",
             "-vf", scale,
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
@@ -135,7 +153,9 @@ public static class StudioProxyPlan
             "-c:a", "aac",
             "-ac", "2",
             "-b:a", "128k",
-            "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+            // Wait for the first fragment before writing moov, so AAC priming is
+            // represented by an edit list instead of stretching the first video frame.
+            "-movflags", "+frag_keyframe+empty_moov+delay_moov+default_base_moof",
             // Without this ffmpeg holds finished fragments in its write buffer, and a
             // growing-file reader sees only the 28-byte ftyp for many seconds.
             "-flush_packets", "1",
@@ -199,7 +219,44 @@ public static class StudioFramePlan
         !string.IsNullOrEmpty(filterList) &&
         filterList.Split('\n').Any(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries).ElementAtOrDefault(1) == "zscale");
 
-    public static IReadOnlyList<string> Arguments(string inputPath, long timeMs, bool hdr, string? colorTransfer, int? maxWidth, bool zscale = true)
+    /// <summary>
+    /// Read packet PTS from the preceding keyframe through the requested position.
+    /// Absolute interval ends (not %+duration) keep a keyframe-rounded seek from
+    /// truncating the scan before the target. Packet order may be DTS/B-frame order.
+    /// </summary>
+    public static IReadOnlyList<string> ProbeArguments(string inputPath, long timeMs, double startSeconds, int videoStreamIndex)
+    {
+        var target = startSeconds + timeMs / 1000.0;
+        return new[]
+        {
+            "-v", "error", "-select_streams", videoStreamIndex.ToString(CultureInfo.InvariantCulture),
+            "-read_intervals", target.ToString("0.#########", CultureInfo.InvariantCulture) + "%" + (target + 1).ToString("0.#########", CultureInfo.InvariantCulture),
+            "-show_packets", "-show_entries", "packet=pts_time", "-of", "json", inputPath
+        };
+    }
+
+    /// <summary>Choose the frame covering the time, never the first future frame.</summary>
+    public static long CoveringFrameSeekMs(string json, long timeMs, double startSeconds = 0)
+    {
+        using var document = JsonDocument.Parse(json);
+        double? previous = null, first = null;
+        var target = startSeconds + timeMs / 1000.0;
+        foreach (var packet in document.RootElement.GetProperty("packets").EnumerateArray())
+        {
+            if (!packet.TryGetProperty("pts_time", out var pts)
+                || !double.TryParse(pts.GetString() ?? pts.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var time)
+                || !double.IsFinite(time)) continue;
+            first = first is null ? time : Math.Min(first.Value, time);
+            if (time <= target + 0.0000001)
+                previous = previous is null ? time : Math.Max(previous.Value, time);
+        }
+        var frame = previous ?? first ?? throw new InvalidDataException("No video timestamps");
+        // Seeking to rounded milliseconds can discard the intended frame. Floor
+        // the measured PTS so accurate_seek retains that exact frame (including VFR).
+        return Math.Max(0, (long)Math.Floor((frame - startSeconds) * 1000 + 0.000001));
+    }
+
+    public static IReadOnlyList<string> Arguments(string inputPath, long timeMs, bool hdr, string? colorTransfer, int? maxWidth, bool zscale = true, int? videoStreamIndex = null)
     {
         var seconds = (timeMs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture);
         return new[]
@@ -207,9 +264,12 @@ public static class StudioFramePlan
             "-hide_banner",
             "-ss", seconds,
             "-accurate_seek",
+            "-copyts", "-start_at_zero",
             "-i", inputPath,
+            "-map", videoStreamIndex is int index ? $"0:{index}" : "0:v:0",
+            "-an",
             "-frames:v", "1",
-            "-vf", Filter(hdr, colorTransfer, ClampWidth(maxWidth), zscale),
+            "-vf", "showinfo," + Filter(hdr, colorTransfer, ClampWidth(maxWidth), zscale),
             "-f", "image2pipe",
             "-vcodec", "png",
             "pipe:1"
@@ -222,18 +282,18 @@ public static class StudioFramePlan
         if (string.IsNullOrEmpty(ffmpegLog))
             return requestedMs;
         const string marker = "pts_time:";
-        var index = ffmpegLog.LastIndexOf(marker, StringComparison.Ordinal);
+        var index = ffmpegLog.IndexOf(marker, StringComparison.Ordinal);
         if (index < 0)
             return requestedMs;
         var start = index + marker.Length;
         var end = start;
-        while (end < ffmpegLog.Length && (char.IsDigit(ffmpegLog[end]) || ffmpegLog[end] == '.'))
+        while (end < ffmpegLog.Length && (char.IsDigit(ffmpegLog[end]) || ".-+eE".Contains(ffmpegLog[end])))
             end++;
         if (end == start)
             return requestedMs;
         if (!double.TryParse(ffmpegLog[start..end], NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
             return requestedMs;
-        return (long)Math.Round(seconds * 1000.0);
+        return Math.Max(0, (long)Math.Round(seconds * 1000.0));
     }
 }
 

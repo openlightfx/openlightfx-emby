@@ -100,6 +100,51 @@ public class EditMediaTests
         Assert.Equal(2500, StudioFramePlan.SourceTimeMs("no pts", 2500));
     }
 
+    [Theory(DisplayName = "PROP-004 @unit source extraction selects the covering frame, including fractional and variable timestamps")]
+    [InlineData(1960, 1958)]
+    [InlineData(1999, 1958)]
+    [InlineData(2000, 2000)]
+    [InlineData(2070, 2000)]
+    [InlineData(2100, 2099)]
+    [InlineData(10000, 9958)]
+    public void Frame_seek_selects_previous_pts(long target, long expected)
+    {
+        const string packets = """
+            {"packets":[{"pts_time":"2.000000"},{"pts_time":"1.916667"},{"pts_time":"1.958333"},{"pts_time":"2.099999"},{"pts_time":"9.958333"}]}
+            """;
+        Assert.Equal(expected, StudioFramePlan.CoveringFrameSeekMs(packets, target));
+    }
+
+    [Fact(DisplayName = "PROP-004 @unit frame selection preserves nonzero source origins and reports actual first output PTS")]
+    public void Frame_origin_and_measured_header()
+    {
+        Assert.Equal(1958, StudioFramePlan.CoveringFrameSeekMs("""{"packets":[{"pts_time":"4.000000"},{"pts_time":"3.958333"}]}""", 1999, 2));
+        Assert.Equal(100, StudioFramePlan.CoveringFrameSeekMs("""{"packets":[{"pts_time":"0.100000"}]}""", 0));
+        Assert.Throws<InvalidDataException>(() => StudioFramePlan.CoveringFrameSeekMs("""{"packets":[{"pts_time":"N/A"}]}""", 1999));
+        Assert.Equal(1958, StudioFramePlan.SourceTimeMs("n:0 pts_time:1.958333 n:1 pts_time:2.000000 ", 1999));
+        Assert.Equal(0, StudioFramePlan.SourceTimeMs("pts_time:-1e-6 ", 1999));
+        var args = string.Join(" ", StudioFramePlan.ProbeArguments("/clip.mkv", 1999, 2, 3));
+        Assert.Contains("-read_intervals 3.999%4.999", args);
+        Assert.Contains("-select_streams 3", args);
+        Assert.Contains("showinfo", string.Join(" ", StudioFramePlan.Arguments("/clip.mkv", 1958, false, "", null)));
+    }
+
+    [Fact(DisplayName = "PROP-004 @unit proxy, probe and PNG select the same real video stream, not cover art")]
+    public void Video_stream_and_source_origin_are_explicit()
+    {
+        var source = StudioFfprobe.Parse("""
+            {"format":{"start_time":"2.000","duration":"12"},"streams":[
+            {"index":0,"codec_type":"video","codec_name":"mjpeg","disposition":{"attached_pic":1}},
+            {"index":1,"codec_type":"audio","codec_name":"aac"},
+            {"index":2,"codec_type":"video","codec_name":"h264","avg_frame_rate":"24/1"}]}
+            """);
+        Assert.Equal(2, source.VideoStreamIndex);
+        Assert.Equal(2, source.StartSeconds);
+        Assert.Equal("h264", source.VideoCodec);
+        Assert.Contains("-map 0:2", string.Join(" ", StudioProxyPlan.Arguments("/in.mkv", "/out.mp4", source.Fps, source.VideoStreamIndex)));
+        Assert.Contains("-map 0:2", string.Join(" ", StudioFramePlan.Arguments("/in.mkv", 1958, false, "", null, true, source.VideoStreamIndex)));
+    }
+
     [Theory(DisplayName = "PLUG-003 @fixture the proxy is H.264 with a keyframe at least every 500 ms")]
     [InlineData(24)]
     [InlineData(23.976)]
@@ -119,7 +164,8 @@ public class EditMediaTests
         Assert.Contains("scenecut=0", args);
         Assert.Contains("open-gop=0", args);
         Assert.Contains("+cgop", args);
-        Assert.Contains("frag_keyframe+empty_moov", args);
+        Assert.Contains("frag_keyframe+empty_moov+delay_moov", args);
+        Assert.Contains("-map 0:v:0 -map 0:a:0?", args);
         Assert.Contains("-flush_packets 1", args);
         Assert.DoesNotContain("-re", args, StringComparison.Ordinal);
         Assert.DoesNotContain("Transcode", args, StringComparison.OrdinalIgnoreCase);
@@ -172,6 +218,8 @@ public class EditMediaTests
             File.WriteAllBytes(path, new byte[] { 0, 0, 0, 28 });
             Assert.False(StudioProxyJob.IsComplete(path));
             File.WriteAllText(StudioProxyJob.CompleteMarker(path), "ok");
+            Assert.False(StudioProxyJob.IsComplete(path));
+            File.WriteAllText(StudioProxyJob.CompleteMarker(path), StudioProxyPlan.CacheVersion);
             Assert.True(StudioProxyJob.IsComplete(path));
             StudioProxyJob.DiscardPartial(path);
             Assert.False(File.Exists(path));

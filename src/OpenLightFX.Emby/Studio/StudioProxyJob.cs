@@ -39,7 +39,8 @@ public sealed class StudioProxyJob
     public static bool IsComplete(string outputPath) =>
         File.Exists(outputPath)
         && new FileInfo(outputPath).Length > 0
-        && File.Exists(CompleteMarker(outputPath));
+        && File.Exists(CompleteMarker(outputPath))
+        && File.ReadAllText(CompleteMarker(outputPath)) == StudioProxyPlan.CacheVersion;
 
     /// <summary>Removes a partial proxy and its marker so the next encode starts clean.</summary>
     public static void DiscardPartial(string outputPath)
@@ -111,7 +112,7 @@ public sealed class StudioProxyJob
             {
                 if (process.ExitCode == 0 && File.Exists(OutputPath))
                 {
-                    File.WriteAllText(CompleteMarkerPath, "ok");
+                    File.WriteAllText(CompleteMarkerPath, StudioProxyPlan.CacheVersion);
                     MarkReady(Math.Max(EncodedThroughMs, 0));
                 }
                 else

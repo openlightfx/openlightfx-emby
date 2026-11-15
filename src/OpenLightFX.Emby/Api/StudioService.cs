@@ -591,12 +591,27 @@ public class StudioService : IService, IRequiresRequest
 
         var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
         var zscale = source.Hdr && await HasZscaleAsync(ffmpeg).ConfigureAwait(false);
-        var arguments = StudioFramePlan.Arguments(item.Path, timeMs, source.Hdr, source.ColorTransfer, request.MaxWidth, zscale);
+        var (probeCode, packets, _) = await StudioProcess.RunAsync(
+            RequireTool(FfprobePath(), "ffprobe"),
+            StudioFramePlan.ProbeArguments(item.Path, timeMs, source.StartSeconds, source.VideoStreamIndex),
+            CancellationToken.None).ConfigureAwait(false);
+        if (probeCode != 0)
+            throw new ServiceUnavailableException("Frame position could not be read");
+        long frameTime;
+        try
+        {
+            frameTime = StudioFramePlan.CoveringFrameSeekMs(Encoding.UTF8.GetString(packets), timeMs, source.StartSeconds);
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException or KeyNotFoundException)
+        {
+            throw new ServiceUnavailableException("Frame position could not be read");
+        }
+        var arguments = StudioFramePlan.Arguments(item.Path, frameTime, source.Hdr, source.ColorTransfer, request.MaxWidth, zscale, source.VideoStreamIndex);
         var (code, png, log) = await StudioProcess.RunAsync(ffmpeg, arguments, CancellationToken.None).ConfigureAwait(false);
         if (code != 0 || png.Length < 8 || png[0] != 0x89)
             throw new ServiceUnavailableException("Frame extraction failed");
 
-        var actual = StudioFramePlan.SourceTimeMs(log, timeMs);
+        var actual = StudioFramePlan.SourceTimeMs(log, frameTime);
         return _results.GetResult(
             Request,
             new ReadOnlyMemory<byte>(png),
@@ -1046,7 +1061,7 @@ public class StudioService : IService, IRequiresRequest
 
             try
             {
-                job.Start(RequireTool(FfmpegPath(), "ffmpeg"), StudioProxyPlan.Arguments(item.Path, output, source.Fps));
+                job.Start(RequireTool(FfmpegPath(), "ffmpeg"), StudioProxyPlan.Arguments(item.Path, output, source.Fps, source.VideoStreamIndex));
             }
             catch (Exception ex)
             {
