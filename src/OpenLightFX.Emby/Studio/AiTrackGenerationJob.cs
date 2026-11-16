@@ -13,6 +13,24 @@ public sealed record AiTrackGenerationOptions(
     IReadOnlyList<AiTrackZone> Zones);
 
 /// <summary>One non-cancelable Studio keyframe-generation job, owned by Emby.</summary>
+public static class AiTrackSceneCut
+{
+    public static bool ShouldEmitKeyframe(
+        bool hasPrevious,
+        (byte R, byte G, byte B) previous,
+        (byte R, byte G, byte B) current,
+        double threshold) => !hasPrevious || IsCut(previous, current, threshold);
+
+    public static bool IsCut((byte R, byte G, byte B) previous, (byte R, byte G, byte B) current, double threshold)
+    {
+        var dr = previous.R - current.R;
+        var dg = previous.G - current.G;
+        var db = previous.B - current.B;
+        var difference = Math.Sqrt(dr * dr + dg * dg + db * db) / Math.Sqrt(3 * 255.0 * 255.0);
+        return difference >= threshold;
+    }
+}
+
 public sealed class AiTrackGenerationJob
 {
     private const int FrameWidth = 64;
@@ -96,18 +114,23 @@ public sealed class AiTrackGenerationJob
                 foreach (var zone in Options.Zones)
                 {
                     var color = AverageZone(frame, zone, Options.CenterExclusionPercent);
-                    var cut = previous.TryGetValue(zone.ChannelId, out var old) &&
-                        ColorDifference(old, color) >= Options.SceneCutThreshold;
+                    var hasPrevious = previous.TryGetValue(zone.ChannelId, out var old);
+                    var emitKeyframe = AiTrackSceneCut.ShouldEmitKeyframe(
+                        hasPrevious, old, color, Options.SceneCutThreshold);
+                    var sceneCut = hasPrevious && emitKeyframe;
+                    previous[zone.ChannelId] = color;
+                    // Emit one initial state per channel, then only emit when the sampled zone
+                    // changes enough to cross the configured scene-cut threshold.
+                    if (!emitKeyframe) continue;
                     generated.Add(new StudioGeneratedKeyframe
                     {
                         Id = $"ai-gen-{Id[..8]}-{zone.ChannelId}-{frameIndex}",
                         ChannelId = zone.ChannelId,
                         TimestampMs = timeMs,
                         R = color.R, G = color.G, B = color.B,
-                        TransitionMs = (uint)Math.Min(cut ? 200 : 1500, timeMs),
+                        TransitionMs = (uint)Math.Min(sceneCut ? 200 : 1500, timeMs),
                         PowerOn = (0.299 * color.R + 0.587 * color.G + 0.114 * color.B) >= 8
                     });
-                    previous[zone.ChannelId] = color;
                 }
                 lock (_gate)
                 {
@@ -176,13 +199,6 @@ public sealed class AiTrackGenerationJob
         return count == 0 ? ((byte)0, (byte)0, (byte)0) : ((byte)(r / count), (byte)(g / count), (byte)(b / count));
     }
 
-    private static double ColorDifference((byte R, byte G, byte B) a, (byte R, byte G, byte B) b)
-    {
-        var dr = a.R - b.R;
-        var dg = a.G - b.G;
-        var db = a.B - b.B;
-        return Math.Sqrt(dr * dr + dg * dg + db * db) / Math.Sqrt(3 * 255.0 * 255.0);
-    }
 }
 
 [System.Runtime.Serialization.DataContract]
