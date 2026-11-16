@@ -7,5 +7,6 @@ public record EffectCommand(
     uint OffsetMs,
     byte R, byte G, byte B,
     uint Brightness,
-    uint TransitionMs
+    uint TransitionMs,
+    uint ColorTemperature = 0
 );

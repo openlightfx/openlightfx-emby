@@ -113,17 +113,21 @@ public sealed class StudioPreviewHost : IAsyncDisposable
                 (byte)Math.Clamp(sample.G, 0, 255),
                 (byte)Math.Clamp(sample.B, 0, 255),
                 (uint)Math.Clamp(sample.Brightness, 0, 100),
-                0,
-                Openlightfx.ColorMode.Rgb,
+                (uint)Math.Clamp(sample.ColorTemperature, 0, 10000),
+                sample.ColorTemperature > 0 ? Openlightfx.ColorMode.ColorTemperature : Openlightfx.ColorMode.Rgb,
                 sample.Brightness > 0));
             var mixed = OpenLightFX.Emby.Rooms.BulbMixer.Mix(sources.ToArray());
+            var allSameKelvin = pair.Value.Count > 0
+                && pair.Value.All(sample => sample.ColorTemperature > 0)
+                && pair.Value.Select(sample => sample.ColorTemperature).Distinct().Count() == 1;
             return new StudioPreviewSample(
                 pair.Key,
                 mixed.R,
                 mixed.G,
                 mixed.B,
                 (int)mixed.Brightness,
-                pair.Value.Max(sample => Math.Max(sample.TransitionMs, 0)));
+                pair.Value.Max(sample => Math.Max(sample.TransitionMs, 0)),
+                allSameKelvin ? (uint)pair.Value[0].ColorTemperature : 0);
         }).ToArray();
         await session.SubmitFrameAsync(bulbSamples, now).ConfigureAwait(false);
     }

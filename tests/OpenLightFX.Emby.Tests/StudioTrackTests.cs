@@ -282,6 +282,34 @@ public class StudioPreviewTests
         await session.DisposeAsync();
     }
 
+    [Fact(DisplayName = "PREV-006 @fixture zero-brightness preview turns the bulb off")]
+    public async Task Zero_brightness_preview_turns_the_bulb_off()
+    {
+        var driver = new FakeDriver();
+        var session = await Session(driver, photosensitivity: false);
+
+        await session.SubmitFrameAsync(
+            new[] { new StudioPreviewSample("b1", 0, 0, 0, 0, 0) }, T0);
+
+        Assert.Equal(new[] { false }, driver.Power);
+        Assert.Empty(driver.States);
+        await session.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "PREV-006 @fixture Kelvin preview calls the driver's temperature API")]
+    public async Task Kelvin_preview_uses_color_temperature_command()
+    {
+        var driver = new FakeDriver();
+        var session = await Session(driver, photosensitivity: false);
+
+        await session.SubmitFrameAsync(
+            new[] { new StudioPreviewSample("b1", 255, 210, 175, 50, 0, 4200) }, T0);
+
+        Assert.Equal(new[] { (4200u, 50u, 0u) }, driver.Temperatures);
+        Assert.Empty(driver.States);
+        await session.DisposeAsync();
+    }
+
     [Fact(DisplayName = "PLUG-005 @fixture takeover starts while playback is active")]
     public async Task Takeover_starts_while_playback_is_active()
     {
@@ -367,6 +395,7 @@ public class StudioPreviewTests
         public BulbState? Prior { get; init; }
         public List<(byte R, byte G, byte B, uint Brightness, uint TransitionMs)> States { get; } = new();
         public List<bool> Power { get; } = new();
+        public List<(uint Kelvin, uint Brightness, uint TransitionMs)> Temperatures { get; } = new();
         public string DriverName => "fake";
         public BulbCapabilityProfile GetCapabilities() => Capabilities;
         public Task SetState(byte r, byte g, byte b, uint brightness, uint transitionMs)
@@ -376,7 +405,11 @@ public class StudioPreviewTests
         }
         public Task SetColor(byte r, byte g, byte b, uint transitionMs = 0) => Task.CompletedTask;
         public Task SetBrightness(uint brightness, uint transitionMs = 0) => Task.CompletedTask;
-        public Task SetColorTemperature(uint kelvin, uint brightness, uint transitionMs = 0) => Task.CompletedTask;
+        public Task SetColorTemperature(uint kelvin, uint brightness, uint transitionMs = 0)
+        {
+            Temperatures.Add((kelvin, brightness, transitionMs));
+            return Task.CompletedTask;
+        }
         public Task SetPower(bool on)
         {
             Power.Add(on);

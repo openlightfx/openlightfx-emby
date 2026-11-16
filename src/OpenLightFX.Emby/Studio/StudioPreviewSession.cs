@@ -18,13 +18,15 @@ public readonly record struct StudioPreviewSample(
     int G,
     int B,
     int Brightness,
-    int TransitionMs);
+    int TransitionMs,
+    uint ColorTemperature = 0);
 
 public readonly record struct StudioPreviewChannelSample(
     string ChannelId,
     int R,
     int G,
     int B,
+    int ColorTemperature,
     int Brightness,
     int TransitionMs);
 
@@ -300,7 +302,8 @@ public sealed class StudioPreviewSession : IAsyncDisposable
             G: (byte)Math.Clamp(sample.G, 0, 255),
             B: (byte)Math.Clamp(sample.B, 0, 255),
             Brightness: (uint)Math.Clamp(sample.Brightness, 0, 100),
-            TransitionMs: Math.Max(requested, minTransition));
+            TransitionMs: Math.Max(requested, minTransition),
+            ColorTemperature: sample.ColorTemperature);
 
         // Shape against commands already sent. Pending frames are not committed,
         // so a coalesced burst is filtered as one change from the last real state.
@@ -331,7 +334,16 @@ public sealed class StudioPreviewSession : IAsyncDisposable
 
     private static async Task SendAsync(Lane lane, EffectCommand command)
     {
-        if (lane.Capabilities.SupportsRgb)
+        if (command.Brightness == 0)
+        {
+            await lane.Driver.SetPower(false).ConfigureAwait(false);
+        }
+        else if (command.ColorTemperature > 0 && lane.Capabilities.SupportsColorTemp)
+        {
+            await lane.Driver.SetColorTemperature(
+                command.ColorTemperature, command.Brightness, command.TransitionMs).ConfigureAwait(false);
+        }
+        else if (lane.Capabilities.SupportsRgb)
         {
             await lane.Driver.SetState(
                 command.R, command.G, command.B, command.Brightness, command.TransitionMs)

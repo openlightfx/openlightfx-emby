@@ -366,6 +366,10 @@ public class StudioPreviewStateDto
     [JsonPropertyName("b")]
     public int B { get; set; }
 
+    [DataMember(Name = "colorTemperature")]
+    [JsonPropertyName("colorTemperature")]
+    public int ColorTemperature { get; set; }
+
     [DataMember(Name = "brightness")]
     [JsonPropertyName("brightness")]
     public int Brightness { get; set; }
@@ -922,7 +926,7 @@ public class StudioService : IService, IRequiresRequest
         var entry = RequireEntry();
         var samples = (request.States ?? new List<StudioPreviewStateDto>())
             .Select(state => new StudioPreviewChannelSample(
-                state.ChannelId, state.R, state.G, state.B, state.Brightness, state.TransitionMs))
+                state.ChannelId, state.R, state.G, state.B, state.ColorTemperature, state.Brightness, state.TransitionMs))
             .ToList();
 
         try
