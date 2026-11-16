@@ -53,14 +53,16 @@ public class WizDriver : IBulbDriver
         // WiZ's minimum dimming is nonzero: an empty channel must not turn it on.
         var powered = brightness > 0;
         var dimming = MapBrightness(brightness);
+        var (outR, outG, outB, warmWhite) = RgbToRgbWarmWhite(r, g, b);
         var payload = new JsonObject
         {
             ["method"] = "setPilot",
             ["params"] = new JsonObject
             {
-                ["r"] = r,
-                ["g"] = g,
-                ["b"] = b,
+                ["r"] = outR,
+                ["g"] = outG,
+                ["b"] = outB,
+                ["w"] = warmWhite,
                 ["dimming"] = dimming,
                 ["state"] = powered
             }
@@ -74,14 +76,16 @@ public class WizDriver : IBulbDriver
     {
         var brightness = _lastKnownState?.Brightness ?? 100;
         var dimming = MapBrightness(brightness);
+        var (outR, outG, outB, warmWhite) = RgbToRgbWarmWhite(r, g, b);
         var payload = new JsonObject
         {
             ["method"] = "setPilot",
             ["params"] = new JsonObject
             {
-                ["r"] = r,
-                ["g"] = g,
-                ["b"] = b,
+                ["r"] = outR,
+                ["g"] = outG,
+                ["b"] = outB,
+                ["w"] = warmWhite,
                 ["dimming"] = dimming,
                 ["state"] = true
             }
@@ -96,15 +100,17 @@ public class WizDriver : IBulbDriver
         var dimming = MapBrightness(brightness);
         var state = _lastKnownState;
         byte r = state?.R ?? 255, g = state?.G ?? 255, bVal = state?.B ?? 255;
+        var (outR, outG, outB, warmWhite) = RgbToRgbWarmWhite(r, g, bVal);
 
         var payload = new JsonObject
         {
             ["method"] = "setPilot",
             ["params"] = new JsonObject
             {
-                ["r"] = r,
-                ["g"] = g,
-                ["b"] = bVal,
+                ["r"] = outR,
+                ["g"] = outG,
+                ["b"] = outB,
+                ["w"] = warmWhite,
                 ["dimming"] = dimming,
                 ["state"] = true
             }
@@ -266,6 +272,63 @@ public class WizDriver : IBulbDriver
         {
             return null;
         }
+    }
+
+    // WiZ RGB(W) bulbs expose a warm-white channel alongside RGB. This follows
+    // pywizlight's RGB→RGBCW mapping so lower-saturation colors can use the white LED.
+    // Reference: https://github.com/sbidy/pywizlight/blob/master/pywizlight/rgbcw.py
+    private static (byte R, byte G, byte B, byte WarmWhite) RgbToRgbWarmWhite(byte red, byte green, byte blue)
+    {
+        const double epsilon = 1e-12;
+        const int cwMax = 128;
+        var r = red / 255.0;
+        var g = green / 255.0;
+        var b = blue / 255.0;
+        var x = r - 0.5 * g - 0.5 * b;
+        var y = Math.Sqrt(3) * 0.5 * (g - b);
+        var saturation = Math.Sqrt(x * x + y * y);
+        if (saturation <= epsilon) return (0, 0, 0, cwMax);
+
+        x /= saturation;
+        y /= saturation;
+        var basis = new (double X, double Y)[]
+        {
+            (1, 0), (-0.5, Math.Sqrt(3) * 0.5), (-0.5, -Math.Sqrt(3) * 0.5)
+        };
+        var active = Enumerable.Range(0, basis.Length)
+            .Where(i => x * basis[i].X + y * basis[i].Y > Math.Cos(2 * Math.PI / 3 - epsilon))
+            .ToArray();
+        var rgb = new double[3];
+        if (active.Length == 1)
+        {
+            rgb[active[0]] = 1;
+        }
+        else if (active.Length == 2)
+        {
+            var first = basis[active[0]];
+            var second = basis[active[1]];
+            var perpendicular = (X: second.Y, Y: -second.X);
+            var coeff0 = (x * perpendicular.X + y * perpendicular.Y) /
+                (first.X * perpendicular.X + first.Y * perpendicular.Y);
+            var ix = x - first.X * coeff0;
+            var iy = y - first.Y * coeff0;
+            var coeff1 = ix * second.X + iy * second.Y;
+            var maxCoeff = Math.Max(coeff0, coeff1);
+            if (maxCoeff > epsilon)
+            {
+                rgb[active[0]] = Math.Clamp(coeff0 / maxCoeff, 0, 1);
+                rgb[active[1]] = Math.Clamp(coeff1 / maxCoeff, 0, 1);
+            }
+        }
+
+        var cw = saturation >= 0.5 ? 1 - ((saturation - 0.5) * 2) : 1;
+        if (saturation < 0.5)
+            for (var i = 0; i < rgb.Length; i++) rgb[i] *= saturation * 2;
+        return (
+            (byte)(Math.Clamp(rgb[0], 0, 1) * 255),
+            (byte)(Math.Clamp(rgb[1], 0, 1) * 255),
+            (byte)(Math.Clamp(rgb[2], 0, 1) * 255),
+            (byte)(Math.Clamp(cw, 0, 1) * cwMax));
     }
 
     // Maps track brightness (0–100) → Wiz dimming (10–100)

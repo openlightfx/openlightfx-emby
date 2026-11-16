@@ -32,6 +32,33 @@ public class UdpPowerTests
     }
 
     [Fact]
+    public async Task WizRgbOutputUsesWarmWhiteChannelForGoldButNotSaturatedRed()
+    {
+        using var socket = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        await using var driver = new WizDriver(new WizBulbConfig
+        {
+            IpAddress = IPAddress.Loopback, Port = ((IPEndPoint)socket.Client.LocalEndPoint!).Port
+        });
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        await driver.SetState(255, 190, 70, 100, 100);
+        using var gold = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
+        var goldParams = gold.RootElement.GetProperty("params");
+        Assert.True(goldParams.GetProperty("w").GetInt32() > 0);
+        Assert.True(goldParams.GetProperty("r").GetInt32() > goldParams.GetProperty("g").GetInt32());
+
+        await driver.SetState(255, 0, 0, 100, 100);
+        using var red = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
+        Assert.Equal(0, red.RootElement.GetProperty("params").GetProperty("w").GetInt32());
+
+        await driver.SetState(255, 255, 255, 100, 100);
+        using var white = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
+        var whiteParams = white.RootElement.GetProperty("params");
+        Assert.Equal(128, whiteParams.GetProperty("w").GetInt32());
+        Assert.Equal(0, whiteParams.GetProperty("r").GetInt32());
+    }
+
+    [Fact]
     public async Task WizEmptyChannelDoesNotTurnOnAtMinimumDimming()
     {
         using var socket = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
