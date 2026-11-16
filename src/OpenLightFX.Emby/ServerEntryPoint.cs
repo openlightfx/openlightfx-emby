@@ -289,35 +289,20 @@ public class ServerEntryPoint : IServerEntryPoint
 
             _logger.Info("Found {0} track(s) for '{1}'", tracks.Count, item.Name);
 
-            // Per-device track selection (EMB-038): check device scope first, then global
+            // Per-device selection takes precedence over the movie-wide selection. If neither
+            // points to a discovered valid track, activate a stable default instead of skipping.
             var selectedPath = _selectionService.GetSelectedTrack(itemId, deviceId);
-            if (selectedPath == null)
-            {
-                if (tracks.Count == 1)
-                {
-                    // Only one track available — use it automatically
-                    _logger.Debug("Auto-selecting sole track '{0}' for '{1}'", tracks[0].FileName, item.Name);
-                    selectedPath = tracks[0].FilePath;
-                }
-                else
-                {
-                    // Multiple tracks, none selected — proceed without lighting (EMB-011)
-                    _logger.Debug("No track selected for '{0}' (device={1}) — skipping lighting",
-                        item.Name, deviceId ?? "global");
-                    _noTrackSessions.TryAdd(sessionId, true);
-                    return;
-                }
-            }
-
-            var trackInfo = tracks.FirstOrDefault(t => t.FilePath == selectedPath)
-                ?? tracks.FirstOrDefault(t => t.IsValid);
-
+            var trackInfo = _selectionService.ResolveTrackForPlayback(itemId, deviceId, tracks);
             if (trackInfo == null || !trackInfo.IsValid)
             {
                 _logger.Warn("No valid track for '{0}': {1}", item.Name,
                     string.Join("; ", tracks.Select(t => t.FileName + ": " + string.Join(", ", t.ValidationErrors))));
                 return;
             }
+
+            if (!string.Equals(selectedPath, trackInfo.FilePath, StringComparison.Ordinal))
+                _logger.Info("Auto-selected track '{0}' for '{1}' (device={2})",
+                    trackInfo.FileName, item.Name, deviceId ?? "global");
 
             if (options.ShowFlashingWarnings && trackInfo.Track.SafetyInfo != null)
             {

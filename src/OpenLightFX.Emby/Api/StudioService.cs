@@ -71,6 +71,36 @@ public class PostStudioProxy
     public string ItemId { get; set; } = "";
 }
 
+[Route("/OpenLightFX/Studio/Items/{ItemId}/Generate", "POST", Description = "Generate lighting keyframes from a movie")]
+[Authenticated(Roles = "Admin")]
+[DataContract]
+public class PostStudioGeneration : IReturn<StudioGenerationResponse>
+{
+    [DataMember(Name = "itemId")] public string ItemId { get; set; } = "";
+    [DataMember(Name = "sampleRateFps")] public double SampleRateFps { get; set; } = 1;
+    [DataMember(Name = "sceneCutThreshold")] public double SceneCutThreshold { get; set; } = 0.35;
+    [DataMember(Name = "centerExclusionPercent")] public double CenterExclusionPercent { get; set; }
+    [DataMember(Name = "zones")] public List<StudioGenerationZoneRequest> Zones { get; set; } = new();
+}
+
+[DataContract]
+public class StudioGenerationZoneRequest
+{
+    [DataMember(Name = "channelId"), JsonPropertyName("channelId")] public string ChannelId { get; set; } = "";
+    [DataMember(Name = "x"), JsonPropertyName("x")] public double X { get; set; }
+    [DataMember(Name = "y"), JsonPropertyName("y")] public double Y { get; set; }
+    [DataMember(Name = "width"), JsonPropertyName("width")] public double Width { get; set; }
+    [DataMember(Name = "height"), JsonPropertyName("height")] public double Height { get; set; }
+}
+
+[Route("/OpenLightFX/Studio/Generation/{JobId}", "GET", Description = "Get lighting keyframe generation progress")]
+[Authenticated(Roles = "Admin")]
+public class GetStudioGeneration : IReturn<StudioGenerationResponse>
+{
+    public string JobId { get; set; } = "";
+    public int? AfterSequence { get; set; }
+}
+
 [Route("/OpenLightFX/Studio/Items/{ItemId}/Proxy/Media", "GET", Description = "Direct-play the edit proxy")]
 [Unauthenticated]
 public class GetStudioProxyMedia
@@ -320,6 +350,18 @@ public class StudioMediaInfoResponse
 }
 
 [DataContract]
+public class StudioGenerationResponse
+{
+    [DataMember(Name = "jobId"), JsonPropertyName("jobId")] public string JobId { get; set; } = "";
+    [DataMember(Name = "state"), JsonPropertyName("state")] public string State { get; set; } = "";
+    [DataMember(Name = "error"), JsonPropertyName("error")] public string Error { get; set; } = "";
+    [DataMember(Name = "progress"), JsonPropertyName("progress")] public double Progress { get; set; }
+    [DataMember(Name = "throughMs"), JsonPropertyName("throughMs")] public long ThroughMs { get; set; }
+    [DataMember(Name = "sequence"), JsonPropertyName("sequence")] public int Sequence { get; set; }
+    [DataMember(Name = "keyframes"), JsonPropertyName("keyframes")] public List<StudioGeneratedKeyframe> Keyframes { get; set; } = new();
+}
+
+[DataContract]
 public class StudioProxyStatusResponse
 {
     [DataMember(Name = "state")]
@@ -560,6 +602,68 @@ public class StudioService : IService, IRequiresRequest
         var job = EnsureProxy(item, source);
         StudioSessionAuth.Remember(Request, StudioTicketScope.ProxyMedia);
         return ToProxy(job, EditUrl(itemId));
+    }
+
+    public async Task<object> Post(PostStudioGeneration request)
+    {
+        var item = RequireItem(request.ItemId);
+        if (string.IsNullOrEmpty(item.Path))
+            throw new ArgumentException("Movie has no media file");
+        if (!double.IsFinite(request.SampleRateFps) || !double.IsFinite(request.SceneCutThreshold)
+            || !double.IsFinite(request.CenterExclusionPercent))
+            throw new ArgumentException("Generation settings must be finite numbers");
+        if (request.Zones == null || request.Zones.Count == 0 || request.Zones.Count > 6)
+            throw new ArgumentException("Select a sampling zone for each track channel");
+        if (request.Zones.Any(zone => string.IsNullOrWhiteSpace(zone.ChannelId)
+            || !double.IsFinite(zone.X) || !double.IsFinite(zone.Y)
+            || !double.IsFinite(zone.Width) || !double.IsFinite(zone.Height)
+            || zone.X < 0 || zone.Y < 0 || zone.Width <= 0 || zone.Height <= 0
+            || zone.X + zone.Width > 1 || zone.Y + zone.Height > 1))
+            throw new ArgumentException("A sampling zone is outside the video frame");
+        if (request.Zones.Select(zone => zone.ChannelId).Distinct(StringComparer.Ordinal).Count() != request.Zones.Count)
+            throw new ArgumentException("Each channel can have only one sampling zone");
+
+        var source = await ProbeAsync(item).ConfigureAwait(false);
+        var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
+        var zscale = source.Hdr && await HasZscaleAsync(ffmpeg).ConfigureAwait(false);
+        var options = new AiTrackGenerationOptions(
+            Math.Clamp(request.SampleRateFps, 0.1, 5),
+            Math.Clamp(request.SceneCutThreshold, 0.01, 1),
+            Math.Clamp(request.CenterExclusionPercent, 0, 90),
+            request.Zones.Select(zone => new AiTrackZone(zone.ChannelId, zone.X, zone.Y, zone.Width, zone.Height)).ToList());
+        try
+        {
+            var job = AiTrackGenerationJobs.Start(
+                PublicItemId(item), item.Path, source.RuntimeMs, options, ffmpeg, source.Hdr, source.ColorTransfer, zscale, source.VideoStreamIndex);
+            return GenerationResponse(job, 0);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new ConflictException(ex.Message);
+        }
+    }
+
+    public object Get(GetStudioGeneration request)
+    {
+        var job = AiTrackGenerationJobs.Find(request.JobId);
+        if (job == null)
+            throw new ResourceNotFoundException("Generation job not found");
+        return GenerationResponse(job, request.AfterSequence ?? 0);
+    }
+
+    private static StudioGenerationResponse GenerationResponse(AiTrackGenerationJob job, int afterSequence)
+    {
+        var snapshot = job.Snapshot(afterSequence);
+        return new StudioGenerationResponse
+        {
+            JobId = job.Id,
+            State = snapshot.State,
+            Error = snapshot.Error,
+            Progress = snapshot.Progress,
+            ThroughMs = snapshot.ThroughMs,
+            Sequence = snapshot.Count,
+            Keyframes = snapshot.NewKeyframes
+        };
     }
 
     public async Task<object> Get(GetStudioFrame request)

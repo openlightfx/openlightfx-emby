@@ -38,6 +38,50 @@ public class TrackSelectionService
         }
     }
 
+    /// <summary>
+    /// Resolve the active playback track, defaulting to the first valid discovered track.
+    /// The default becomes the movie-wide selection unless a stale device override needs repair.
+    /// </summary>
+    public TrackInfo? ResolveTrackForPlayback(
+        string itemId, string? deviceId, IEnumerable<TrackInfo> tracks)
+    {
+        var available = tracks
+            .Where(track => track.IsValid)
+            .OrderBy(track => track.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(track => track.FilePath, StringComparer.Ordinal)
+            .ToList();
+        if (available.Count == 0)
+            return null;
+
+        lock (_gate)
+        {
+            var deviceKey = string.IsNullOrEmpty(deviceId) ? null : $"{itemId}:{deviceId}";
+            TrackSelection? deviceSelection = null;
+            var hasDeviceSelection = deviceKey != null &&
+                _selections.TryGetValue(deviceKey, out deviceSelection);
+            _selections.TryGetValue(itemId, out var globalSelection);
+            var selected = hasDeviceSelection ? deviceSelection : globalSelection;
+
+            var selectedTrack = selected == null
+                ? null
+                : available.FirstOrDefault(track => string.Equals(
+                    track.FilePath, selected.TrackPath, StringComparison.Ordinal));
+            if (selectedTrack != null)
+                return selectedTrack;
+
+            var defaultTrack = available[0];
+            var selectionKey = hasDeviceSelection ? deviceKey! : itemId;
+            _selections[selectionKey] = new TrackSelection
+            {
+                ItemId = itemId,
+                TrackPath = defaultTrack.FilePath,
+                SelectedAt = DateTime.UtcNow
+            };
+            Save();
+            return defaultTrack;
+        }
+    }
+
     /// <summary>Get the global selected track path (no device scope).</summary>
     public string? GetGlobalSelectedTrack(string itemId)
     {
