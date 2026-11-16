@@ -50,10 +50,11 @@ public class WizDriver : IBulbDriver
 
     public async Task SetState(byte r, byte g, byte b, uint brightness, uint transitionMs)
     {
-        // WiZ's minimum dimming is nonzero: an empty channel must not turn it on.
-        var powered = brightness > 0;
         var dimming = MapBrightness(brightness);
-        var (outR, outG, outB, warmWhite) = RgbToRgbWarmWhite(r, g, b);
+        var (outR, outG, outB, coldWhite, warmWhite) = RgbToRgbColdWarmWhite(r, g, b);
+        // WiZ's minimum dimming is nonzero, and all-zero output can fall back to white.
+        var powered = brightness > 0 &&
+            (outR != 0 || outG != 0 || outB != 0 || coldWhite != 0 || warmWhite != 0);
         var payload = new JsonObject
         {
             ["method"] = "setPilot",
@@ -62,6 +63,7 @@ public class WizDriver : IBulbDriver
                 ["r"] = outR,
                 ["g"] = outG,
                 ["b"] = outB,
+                ["c"] = coldWhite,
                 ["w"] = warmWhite,
                 ["dimming"] = dimming,
                 ["state"] = powered
@@ -76,7 +78,9 @@ public class WizDriver : IBulbDriver
     {
         var brightness = _lastKnownState?.Brightness ?? 100;
         var dimming = MapBrightness(brightness);
-        var (outR, outG, outB, warmWhite) = RgbToRgbWarmWhite(r, g, b);
+        var (outR, outG, outB, coldWhite, warmWhite) = RgbToRgbColdWarmWhite(r, g, b);
+        var powered = brightness > 0 &&
+            (outR != 0 || outG != 0 || outB != 0 || coldWhite != 0 || warmWhite != 0);
         var payload = new JsonObject
         {
             ["method"] = "setPilot",
@@ -85,14 +89,15 @@ public class WizDriver : IBulbDriver
                 ["r"] = outR,
                 ["g"] = outG,
                 ["b"] = outB,
+                ["c"] = coldWhite,
                 ["w"] = warmWhite,
                 ["dimming"] = dimming,
-                ["state"] = true
+                ["state"] = powered
             }
         };
 
         await SendFireAndForget(payload);
-        _lastKnownState = new BulbState(r, g, b, brightness, null, true);
+        _lastKnownState = new BulbState(r, g, b, brightness, null, powered);
     }
 
     public async Task SetBrightness(uint brightness, uint transitionMs = 0)
@@ -100,7 +105,9 @@ public class WizDriver : IBulbDriver
         var dimming = MapBrightness(brightness);
         var state = _lastKnownState;
         byte r = state?.R ?? 255, g = state?.G ?? 255, bVal = state?.B ?? 255;
-        var (outR, outG, outB, warmWhite) = RgbToRgbWarmWhite(r, g, bVal);
+        var (outR, outG, outB, coldWhite, warmWhite) = RgbToRgbColdWarmWhite(r, g, bVal);
+        var powered = brightness > 0 &&
+            (outR != 0 || outG != 0 || outB != 0 || coldWhite != 0 || warmWhite != 0);
 
         var payload = new JsonObject
         {
@@ -110,14 +117,15 @@ public class WizDriver : IBulbDriver
                 ["r"] = outR,
                 ["g"] = outG,
                 ["b"] = outB,
+                ["c"] = coldWhite,
                 ["w"] = warmWhite,
                 ["dimming"] = dimming,
-                ["state"] = true
+                ["state"] = powered
             }
         };
 
         await SendFireAndForget(payload);
-        _lastKnownState = new BulbState(r, g, bVal, brightness, null, true);
+        _lastKnownState = new BulbState(r, g, bVal, brightness, null, powered);
     }
 
     public async Task SetColorTemperature(uint kelvin, uint brightness, uint transitionMs = 0)
@@ -145,6 +153,25 @@ public class WizDriver : IBulbDriver
 
     public async Task SetPower(bool on)
     {
+        // A state-only ON command revives the bulb's previously stored color.
+        // Reapply our latest known mode and color so C/W cannot remain stale.
+        if (on && _lastKnownState is { } knownState)
+        {
+            if (knownState.Brightness == 0)
+                on = false;
+            else if (knownState.ColorTemperature is uint kelvin && kelvin > 0)
+            {
+                await SetColorTemperature(kelvin, knownState.Brightness).ConfigureAwait(false);
+                return;
+            }
+            else
+            {
+                await SetState(knownState.R, knownState.G, knownState.B, knownState.Brightness, 0)
+                    .ConfigureAwait(false);
+                return;
+            }
+        }
+
         var payload = new JsonObject
         {
             ["method"] = "setPilot",
@@ -274,61 +301,81 @@ public class WizDriver : IBulbDriver
         }
     }
 
-    // WiZ RGB(W) bulbs expose a warm-white channel alongside RGB. This follows
-    // pywizlight's RGB→RGBCW mapping so lower-saturation colors can use the white LED.
+    // Extract the shared white contribution with pywizlight's RGB→RGBCW mapping,
+    // then split it between WiZ's cold (c) and warm (w) white LEDs. The blue/red
+    // balance is a tint heuristic; neutral inputs divide the white output evenly.
     // Reference: https://github.com/sbidy/pywizlight/blob/master/pywizlight/rgbcw.py
-    private static (byte R, byte G, byte B, byte WarmWhite) RgbToRgbWarmWhite(byte red, byte green, byte blue)
+    private static (byte R, byte G, byte B, byte ColdWhite, byte WarmWhite) RgbToRgbColdWarmWhite(
+        byte red, byte green, byte blue)
     {
         const double epsilon = 1e-12;
         const int cwMax = 128;
-        var r = red / 255.0;
-        var g = green / 255.0;
-        var b = blue / 255.0;
+        var maxChannel = Math.Max(red, Math.Max(green, blue));
+        if (maxChannel == 0)
+            return (0, 0, 0, 0, 0);
+
+        // Separate color intensity from chromaticity. The previous mapping treated
+        // every low-level RGB value as unsaturated white at full output.
+        var intensity = maxChannel / 255.0;
+        var r = red / (double)maxChannel;
+        var g = green / (double)maxChannel;
+        var b = blue / (double)maxChannel;
         var x = r - 0.5 * g - 0.5 * b;
         var y = Math.Sqrt(3) * 0.5 * (g - b);
         var saturation = Math.Sqrt(x * x + y * y);
-        if (saturation <= epsilon) return (0, 0, 0, cwMax);
-
-        x /= saturation;
-        y /= saturation;
-        var basis = new (double X, double Y)[]
-        {
-            (1, 0), (-0.5, Math.Sqrt(3) * 0.5), (-0.5, -Math.Sqrt(3) * 0.5)
-        };
-        var active = Enumerable.Range(0, basis.Length)
-            .Where(i => x * basis[i].X + y * basis[i].Y > Math.Cos(2 * Math.PI / 3 - epsilon))
-            .ToArray();
         var rgb = new double[3];
-        if (active.Length == 1)
+        if (saturation > epsilon)
         {
-            rgb[active[0]] = 1;
-        }
-        else if (active.Length == 2)
-        {
-            var first = basis[active[0]];
-            var second = basis[active[1]];
-            var perpendicular = (X: second.Y, Y: -second.X);
-            var coeff0 = (x * perpendicular.X + y * perpendicular.Y) /
-                (first.X * perpendicular.X + first.Y * perpendicular.Y);
-            var ix = x - first.X * coeff0;
-            var iy = y - first.Y * coeff0;
-            var coeff1 = ix * second.X + iy * second.Y;
-            var maxCoeff = Math.Max(coeff0, coeff1);
-            if (maxCoeff > epsilon)
+            x /= saturation;
+            y /= saturation;
+            var basis = new (double X, double Y)[]
             {
-                rgb[active[0]] = Math.Clamp(coeff0 / maxCoeff, 0, 1);
-                rgb[active[1]] = Math.Clamp(coeff1 / maxCoeff, 0, 1);
+                (1, 0), (-0.5, Math.Sqrt(3) * 0.5), (-0.5, -Math.Sqrt(3) * 0.5)
+            };
+            var active = Enumerable.Range(0, basis.Length)
+                .Where(i => x * basis[i].X + y * basis[i].Y > Math.Cos(2 * Math.PI / 3 - epsilon))
+                .ToArray();
+            if (active.Length == 1)
+            {
+                rgb[active[0]] = 1;
+            }
+            else if (active.Length == 2)
+            {
+                var first = basis[active[0]];
+                var second = basis[active[1]];
+                var perpendicular = (X: second.Y, Y: -second.X);
+                var coeff0 = (x * perpendicular.X + y * perpendicular.Y) /
+                    (first.X * perpendicular.X + first.Y * perpendicular.Y);
+                var ix = x - first.X * coeff0;
+                var iy = y - first.Y * coeff0;
+                var coeff1 = ix * second.X + iy * second.Y;
+                var maxCoeff = Math.Max(coeff0, coeff1);
+                if (maxCoeff > epsilon)
+                {
+                    rgb[active[0]] = Math.Clamp(coeff0 / maxCoeff, 0, 1);
+                    rgb[active[1]] = Math.Clamp(coeff1 / maxCoeff, 0, 1);
+                }
             }
         }
 
         var cw = saturation >= 0.5 ? 1 - ((saturation - 0.5) * 2) : 1;
         if (saturation < 0.5)
             for (var i = 0; i < rgb.Length; i++) rgb[i] *= saturation * 2;
+
+        var totalWhite = (byte)Math.Round(
+            Math.Clamp(cw, 0, 1) * cwMax * intensity, MidpointRounding.AwayFromZero);
+        var redBlueSum = (int)red + blue;
+        var coldShare = redBlueSum == 0 ? 0.5 : blue / (double)redBlueSum;
+        var coldWhite = (byte)Math.Round(
+            totalWhite * coldShare, MidpointRounding.AwayFromZero);
+        var warmWhite = (byte)(totalWhite - coldWhite);
+
         return (
-            (byte)(Math.Clamp(rgb[0], 0, 1) * 255),
-            (byte)(Math.Clamp(rgb[1], 0, 1) * 255),
-            (byte)(Math.Clamp(rgb[2], 0, 1) * 255),
-            (byte)(Math.Clamp(cw, 0, 1) * cwMax));
+            (byte)(Math.Clamp(rgb[0], 0, 1) * 255 * intensity),
+            (byte)(Math.Clamp(rgb[1], 0, 1) * 255 * intensity),
+            (byte)(Math.Clamp(rgb[2], 0, 1) * 255 * intensity),
+            coldWhite,
+            warmWhite);
     }
 
     // Maps track brightness (0–100) → Wiz dimming (10–100)

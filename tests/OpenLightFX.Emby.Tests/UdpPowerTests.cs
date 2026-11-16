@@ -32,7 +32,7 @@ public class UdpPowerTests
     }
 
     [Fact]
-    public async Task WizRgbOutputUsesWarmWhiteChannelForGoldButNotSaturatedRed()
+    public async Task WizRgbOutputSplitsWhiteBetweenColdAndWarmChannels()
     {
         using var socket = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
         await using var driver = new WizDriver(new WizBulbConfig
@@ -44,18 +44,82 @@ public class UdpPowerTests
         await driver.SetState(255, 190, 70, 100, 100);
         using var gold = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
         var goldParams = gold.RootElement.GetProperty("params");
-        Assert.True(goldParams.GetProperty("w").GetInt32() > 0);
+        var goldCold = goldParams.GetProperty("c").GetInt32();
+        var goldWarm = goldParams.GetProperty("w").GetInt32();
+        Assert.True(goldWarm > goldCold);
+        Assert.True(goldCold > 0);
         Assert.True(goldParams.GetProperty("r").GetInt32() > goldParams.GetProperty("g").GetInt32());
 
         await driver.SetState(255, 0, 0, 100, 100);
         using var red = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
-        Assert.Equal(0, red.RootElement.GetProperty("params").GetProperty("w").GetInt32());
+        var redParams = red.RootElement.GetProperty("params");
+        Assert.Equal(0, redParams.GetProperty("c").GetInt32());
+        Assert.Equal(0, redParams.GetProperty("w").GetInt32());
 
         await driver.SetState(255, 255, 255, 100, 100);
         using var white = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
         var whiteParams = white.RootElement.GetProperty("params");
-        Assert.Equal(128, whiteParams.GetProperty("w").GetInt32());
+        Assert.Equal(64, whiteParams.GetProperty("c").GetInt32());
+        Assert.Equal(64, whiteParams.GetProperty("w").GetInt32());
+        Assert.Equal(
+            128,
+            whiteParams.GetProperty("c").GetInt32() + whiteParams.GetProperty("w").GetInt32());
         Assert.Equal(0, whiteParams.GetProperty("r").GetInt32());
+
+        await driver.SetState(180, 220, 255, 100, 100);
+        using var cool = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
+        var coolParams = cool.RootElement.GetProperty("params");
+        Assert.True(coolParams.GetProperty("c").GetInt32() > coolParams.GetProperty("w").GetInt32());
+
+        await driver.SetState(1, 1, 1, 100, 100);
+        using var dimNeutral = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
+        var dimNeutralParams = dimNeutral.RootElement.GetProperty("params");
+        Assert.True(dimNeutralParams.GetProperty("state").GetBoolean());
+        Assert.Equal(
+            1,
+            dimNeutralParams.GetProperty("c").GetInt32() + dimNeutralParams.GetProperty("w").GetInt32());
+
+        await driver.SetState(1, 0, 0, 100, 100);
+        using var dimRed = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
+        var dimRedParams = dimRed.RootElement.GetProperty("params");
+        Assert.True(dimRedParams.GetProperty("state").GetBoolean());
+        Assert.Equal(1, dimRedParams.GetProperty("r").GetInt32());
+        Assert.Equal(0, dimRedParams.GetProperty("c").GetInt32());
+        Assert.Equal(0, dimRedParams.GetProperty("w").GetInt32());
+    }
+
+    [Fact]
+    public async Task WizBlackRgbAtFullBrightnessStaysOffWhenPoweredOnAgain()
+    {
+        using var socket = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        await using var driver = new WizDriver(new WizBulbConfig
+        {
+            IpAddress = IPAddress.Loopback, Port = ((IPEndPoint)socket.Client.LocalEndPoint!).Port
+        });
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        await driver.SetState(255, 190, 70, 100, 100);
+        _ = await socket.ReceiveAsync(timeout.Token);
+
+        await driver.SetState(0, 0, 0, 100, 100);
+        using var black = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
+        var parameters = black.RootElement.GetProperty("params");
+        Assert.False(parameters.GetProperty("state").GetBoolean());
+        Assert.Equal(0, parameters.GetProperty("r").GetInt32());
+        Assert.Equal(0, parameters.GetProperty("g").GetInt32());
+        Assert.Equal(0, parameters.GetProperty("b").GetInt32());
+        Assert.Equal(0, parameters.GetProperty("c").GetInt32());
+        Assert.Equal(0, parameters.GetProperty("w").GetInt32());
+
+        await driver.SetPower(true);
+        using var poweredBlack = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
+        var poweredBlackParams = poweredBlack.RootElement.GetProperty("params");
+        Assert.False(poweredBlackParams.GetProperty("state").GetBoolean());
+        Assert.Equal(0, poweredBlackParams.GetProperty("r").GetInt32());
+        Assert.Equal(0, poweredBlackParams.GetProperty("g").GetInt32());
+        Assert.Equal(0, poweredBlackParams.GetProperty("b").GetInt32());
+        Assert.Equal(0, poweredBlackParams.GetProperty("c").GetInt32());
+        Assert.Equal(0, poweredBlackParams.GetProperty("w").GetInt32());
     }
 
     [Fact]
