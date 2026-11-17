@@ -174,15 +174,19 @@ public sealed class AiTrackSceneCutTests
     }
 
     [Fact]
-    public void Colour_for_a_cut_is_the_first_sample_at_or_after_the_cut()
+    public void Scene_body_skips_the_cut_and_the_frames_before_the_next_cut()
     {
-        var samples = new long[] { 0, 1000, 2000 };
-        Assert.Equal(0, AiTrackAnalysis.ColorSampleIndex(samples, 0));
-        Assert.Equal(1, AiTrackAnalysis.ColorSampleIndex(samples, 1));
-        Assert.Equal(1, AiTrackAnalysis.ColorSampleIndex(samples, 1000));
-        Assert.Equal(2, AiTrackAnalysis.ColorSampleIndex(samples, 2000));
-        Assert.Equal(2, AiTrackAnalysis.ColorSampleIndex(samples, 2500));
-        Assert.Equal(-1, AiTrackAnalysis.ColorSampleIndex(Array.Empty<long>(), 10));
+        Assert.False(SceneSampling.IsBodyFrame(0, 0, 48));
+        Assert.False(SceneSampling.IsBodyFrame(11, 0, 48));
+        Assert.True(SceneSampling.IsBodyFrame(12, 0, 48));
+        Assert.True(SceneSampling.IsBodyFrame(41, 0, 48));
+        Assert.False(SceneSampling.IsBodyFrame(42, 0, 48));
+        Assert.False(SceneSampling.IsBodyFrame(48, 0, 48));
+
+        // 15-frame scene: the main window is empty, so the body is after a short skip.
+        Assert.False(SceneSampling.IsBodyFrame(12, 10, 25));
+        Assert.True(SceneSampling.IsBodyFrame(13, 10, 25));
+        Assert.False(SceneSampling.IsBodyFrame(25, 10, 25));
     }
 
     [Fact]
