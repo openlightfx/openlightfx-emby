@@ -44,7 +44,7 @@ public class ServerEntryPoint : IServerEntryPoint
 
     // Active lighting sessions keyed by Emby session ID
     private readonly ConcurrentDictionary<string, PlaybackSession> _sessions = new();
-    private int _playbackLightingSuspended;
+    private readonly ConcurrentDictionary<string, bool> _playbackLightingSuspended = new();
 
     // Per-session lighting enabled toggle (EMB-152)
     private readonly ConcurrentDictionary<string, bool> _lightingEnabled = new();
@@ -152,9 +152,11 @@ public class ServerEntryPoint : IServerEntryPoint
                 return;
             }
 
-            // A new Emby play is allowed to own the bulbs again after a Studio takeover.
-            Interlocked.Exchange(ref _playbackLightingSuspended, 0);
+            _noTrackSessions.TryRemove(sessionId, out _);
+            // A new Emby play is allowed to own this room's bulbs after a Studio takeover.
+            if (e.Session?.DeviceId is { } playingDevice) _playbackLightingSuspended.TryRemove(playingDevice, out _);
             var deviceId = e.Session?.DeviceId;
+            if (e.Session != null) Screen.Report(e.Session);
             _ = TryStartLightingSession(sessionId, item, deviceId);
         }
         catch (Exception ex)
@@ -170,6 +172,7 @@ public class ServerEntryPoint : IServerEntryPoint
             var sessionId = e.Session?.Id;
             if (sessionId == null) return;
 
+            Screen.Forget(sessionId);
             if (_sessions.TryRemove(sessionId, out var session))
             {
                 _ = session.StopAsync();
@@ -190,6 +193,9 @@ public class ServerEntryPoint : IServerEntryPoint
         {
             var sessionId = e.Session?.Id;
             if (sessionId == null) return;
+
+            if (e.Session != null) Screen.Report(e.Session);
+            if (Screen.OwnsDevice(e.Session?.DeviceId)) return;
 
             if (!_sessions.ContainsKey(sessionId))
             {
@@ -230,6 +236,7 @@ public class ServerEntryPoint : IServerEntryPoint
 
     private void OnPollTick(object? sender, ElapsedEventArgs e)
     {
+        _ = ExpireScreenLeasesAsync();
         foreach (var (sessionId, session) in _sessions)
         {
             try
@@ -255,7 +262,8 @@ public class ServerEntryPoint : IServerEntryPoint
     {
         try
         {
-            if (Volatile.Read(ref _playbackLightingSuspended) != 0)
+            if (Screen.OwnsDevice(deviceId)) return;
+            if (deviceId != null && _playbackLightingSuspended.ContainsKey(deviceId))
             {
                 _logger.Info("Lighting stays off for session {0}; Studio preview took the bulbs", sessionId);
                 return;
@@ -346,8 +354,10 @@ public class ServerEntryPoint : IServerEntryPoint
 
             await _preview.ExclusiveAsync(async () =>
             {
-                // Preview and playback both own bulb drivers. Stop preview before taking them.
-                await _preview.StopCoreAsync();
+                if (Screen.OwnsDevice(deviceId) ||
+                    (deviceId != null && _playbackLightingSuspended.ContainsKey(deviceId))) return;
+                // Only this room competes for these bulbs; leave other rooms alone.
+                if (_preview.RoomId == room.Id) await _preview.StopCoreAsync();
                 if (!_sessions.TryAdd(sessionId, session))
                     return;
 
@@ -376,11 +386,14 @@ public class ServerEntryPoint : IServerEntryPoint
     /// Stop playback lighting so Studio can drive the bulbs. Progress events do not
     /// start it again until Emby fires a new playback start.
     /// </summary>
-    public async Task SuspendPlaybackLightingAsync()
+    public async Task SuspendPlaybackLightingAsync(string? roomId = null)
     {
-        Interlocked.Exchange(ref _playbackLightingSuspended, 1);
+        var deviceId = roomId == null ? null : _roomStore.FindRoom(roomId)?.Screen.DeviceId;
         foreach (var sessionId in _sessions.Keys.ToArray())
         {
+            var embySession = _sessionManager.Sessions.FirstOrDefault(s => s.Id == sessionId);
+            if (roomId != null && (deviceId == null || embySession?.DeviceId != deviceId)) continue;
+            if (embySession?.DeviceId is { } suspendedDevice) _playbackLightingSuspended[suspendedDevice] = true;
             if (!_sessions.TryRemove(sessionId, out var session))
                 continue;
             try { await session.StopAsync().ConfigureAwait(false); }
@@ -398,6 +411,40 @@ public class ServerEntryPoint : IServerEntryPoint
     public IdentifyService IdentifyService => _identifyService;
     public ILibraryManager LibraryManager => _libraryManager;
     public StudioPreviewHost Preview => _preview;
+    public StudioScreenHost Screen { get; } = new();
+
+    public bool RoomPlaybackActive(string roomId) => _sessions.Keys.Any(id =>
+        _sessionManager.Sessions.Any(s => s.Id == id &&
+            _roomStore.FindRoom(roomId)?.Screen.DeviceId == s.DeviceId));
+
+    // Caller holds Preview.ExclusiveAsync, preventing a concurrent lighting start.
+    public async Task StopRoomLightingAsync(string deviceId)
+    {
+        foreach (var id in _sessions.Keys.ToArray())
+        {
+            if (!_sessionManager.Sessions.Any(s => s.Id == id && s.DeviceId == deviceId)) continue;
+            if (_sessions.TryRemove(id, out var lighting)) await lighting.StopAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task ExpireScreenLeasesAsync()
+    {
+        if (!await Screen.Gate.WaitAsync(0).ConfigureAwait(false)) return;
+        try
+        {
+            foreach (var lease in Screen.Expired())
+            {
+                await _preview.ExclusiveAsync(async () =>
+                {
+                    if (_preview.RoomId == lease.RoomId) await _preview.StopCoreAsync().ConfigureAwait(false);
+                    Screen.Remove(lease);
+                    Screen.Forget(lease.SessionId);
+                }).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) { _logger.Warn("Error releasing room screen: {0}", ex.Message); }
+        finally { Screen.Gate.Release(); }
+    }
     public StudioTrackIndex StudioTrackIndex => _studioTrackIndex;
     public RoomStore RoomStore => _roomStore;
 

@@ -1059,16 +1059,16 @@ public class StudioService : IService, IRequiresRequest
             throw new ArgumentException("room_has_no_bulbs: Place at least one bulb in this room before previewing.");
 
         if (request.Takeover == true)
-            await entry.SuspendPlaybackLightingAsync().ConfigureAwait(false);
+            await entry.SuspendPlaybackLightingAsync(room.Id).ConfigureAwait(false);
 
         var started = await entry.Preview.TryStartAsync(
-            () => entry.ActiveSessionCount > 0,
+            () => entry.RoomPlaybackActive(room.Id),
             request.Takeover == true,
             mapping,
             roomBulbs,
             PhotosensitivityEnabled(),
             BulbDriverFactory.Create,
-            DateTimeOffset.UtcNow).ConfigureAwait(false);
+            DateTimeOffset.UtcNow, room.Id).ConfigureAwait(false);
 
         if (!started)
             throw new ConflictException("playback_active");

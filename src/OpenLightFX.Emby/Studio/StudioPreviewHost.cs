@@ -22,6 +22,8 @@ public sealed class StudioPreviewHost : IAsyncDisposable
         _pump = startPump ? PumpLoop(_cts.Token) : Task.CompletedTask;
     }
 
+    public string? RoomId { get; private set; }
+
     public bool IsActive
     {
         get
@@ -51,7 +53,8 @@ public sealed class StudioPreviewHost : IAsyncDisposable
         IReadOnlyList<BulbConfig> bulbs,
         bool photosensitivity,
         Func<BulbConfig, IBulbDriver> createDriver,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? roomId = null)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
@@ -65,6 +68,7 @@ public sealed class StudioPreviewHost : IAsyncDisposable
             lock (_sessionLock)
             {
                 _session = session;
+                RoomId = roomId;
                 _channelToBulbs = mapping.ToDictionary(
                     entry => entry.Key,
                     entry => entry.Value.Distinct(StringComparer.Ordinal).ToList(),
@@ -153,6 +157,7 @@ public sealed class StudioPreviewHost : IAsyncDisposable
         {
             session = _session;
             _session = null;
+            RoomId = null;
             _channelToBulbs.Clear();
         }
 
