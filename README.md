@@ -71,11 +71,9 @@ This builds, copies the DLL to the Emby server's plugins directory, and restarts
 
 ## Configuration
 
-After installation, navigate to **Emby Dashboard → Plugins → OpenLightFX → Settings**.
+After installation, open **Emby Dashboard → Plugins → OpenLightFX → Settings**. The settings page includes an **Open OpenLightFX Studio** link to `/emby/OpenLightFX/studio/`.
 
-### Bulb Setup
-
-Bulb configuration is managed through the Bulb Setup Wizard at `openlightfx.com/config`. The wizard communicates with the local OpenLightFX Agent for LAN discovery and exports JSON configuration that you paste into the plugin settings.
+Rooms, bulbs, and tracks are set up in Studio. On a movie's details page, the Links row includes **OpenLightFX Studio**. That link opens the movie in Studio (`/emby/OpenLightFX/studio/#/movie/{itemId}`), where you can pick, create, or import a track. The scheduled task **Link movies to OpenLightFX Studio** runs at startup and adds the link for movies already in the library.
 
 ### Playback Settings
 
@@ -95,10 +93,8 @@ The plugin discovers `.lightfx` files using:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/OpenLightFX/Settings` | GET | Playback and safety settings |
 | `/OpenLightFX/Tracks/ByItem?itemId={id}` | GET | List available tracks for a media item |
-| `/OpenLightFX/Tracks/Select` | POST | Set/clear the selected track |
-| `/OpenLightFX/Status` | GET | Current playback status |
-| `/OpenLightFX/Bulbs/Test?bulbId={id}` | GET | Test bulb connectivity |
 | `/OpenLightFX/Studio/Session` | GET | Validate the Emby Web credential or scoped page ticket for Studio API calls |
 | `/OpenLightFX/Studio/Bulbs` | GET | Configured bulbs and capability profiles |
 | `/OpenLightFX/Studio/Items?search=` | GET | Search library movies |
@@ -121,7 +117,7 @@ Services/                    → Track parsing, discovery, selection
 Engine/                      → Playback state machine, scheduler, interpolation
 Effects/                     → Effect renderers (13 types) + photosensitivity filter
 Drivers/                     → IBulbDriver interface + protocol implementations
-Api/                         → REST endpoints + Light Tracks page
+Api/                         → REST endpoints
 Utilities/                   → Color conversion, safety helpers
 ```
 

@@ -1,39 +1,13 @@
 namespace OpenLightFX.Emby.Api;
 
 using MediaBrowser.Model.Services;
-using OpenLightFX.Emby.Configuration;
-using OpenLightFX.Emby.Discovery;
-using OpenLightFX.Emby.Models;
 using System.Collections.Concurrent;
-using System.Net;
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 // ─── Request DTOs ────────────────────────────────────────────────────
-
-[Route("/OpenLightFX/Discover", "POST", Description = "Run bulb discovery across all protocols")]
-public class DiscoverRequest : IReturn<DiscoverResponse> { }
-
-[Route("/OpenLightFX/Identify/{BulbId}", "POST", Description = "Identify a discovered bulb with a visual flash")]
-public class IdentifyBulbRequest : IReturn<IdentifyBulbResponse>
-{
-    public string BulbId { get; set; } = "";
-}
-
-[Route("/OpenLightFX/Discover/Bulb/{BulbId}/State", "GET", Description = "Get current state of a discovered bulb")]
-public class GetBulbStateRequest : IReturn<BulbStateResponse>
-{
-    public string BulbId { get; set; } = "";
-}
-
-[Route("/OpenLightFX/Discover/Bulb/{BulbId}/Test", "POST", Description = "Test a discovered bulb with a brief flash")]
-public class TestDiscoveredBulbRequest : IReturn<TestDiscoveredBulbResponse>
-{
-    public string BulbId { get; set; } = "";
-}
 
 [Route("/OpenLightFX/Hue/Pair", "POST", Description = "Start Hue bridge pairing")]
 public class HuePairRequest : IReturn<HuePairResponse>
@@ -55,96 +29,6 @@ public class GetHueLightsRequest : IReturn<HueLightsResponse>
 }
 
 // ─── Response DTOs ───────────────────────────────────────────────────
-
-public class DiscoverResponse
-{
-    [JsonPropertyName("status")]
-    public string Status { get; set; } = "";
-
-    [JsonPropertyName("discoveredBulbs")]
-    public List<DiscoveredBulbDto> DiscoveredBulbs { get; set; } = new();
-}
-
-public class DiscoveredBulbDto
-{
-    [JsonPropertyName("id")]
-    public string Id { get; set; } = "";
-
-    [JsonPropertyName("protocol")]
-    public string Protocol { get; set; } = "";
-
-    [JsonPropertyName("ipAddress")]
-    public string IpAddress { get; set; } = "";
-
-    [JsonPropertyName("macAddress")]
-    public string? MacAddress { get; set; }
-
-    [JsonPropertyName("name")]
-    public string? Name { get; set; }
-
-    [JsonPropertyName("model")]
-    public string? Model { get; set; }
-
-    [JsonPropertyName("isReachable")]
-    public bool IsReachable { get; set; } = true;
-
-    [JsonPropertyName("discoveredAt")]
-    public DateTime DiscoveredAt { get; set; }
-
-    [JsonPropertyName("isConfigured")]
-    public bool IsConfigured { get; set; }
-}
-
-public class IdentifyBulbResponse
-{
-    [JsonPropertyName("success")]
-    public bool Success { get; set; }
-
-    [JsonPropertyName("error")]
-    public string? Error { get; set; }
-}
-
-public class BulbStateResponse
-{
-    [JsonPropertyName("id")]
-    public string Id { get; set; } = "";
-
-    [JsonPropertyName("protocol")]
-    public string Protocol { get; set; } = "";
-
-    [JsonPropertyName("ipAddress")]
-    public string IpAddress { get; set; } = "";
-
-    [JsonPropertyName("port")]
-    public int Port { get; set; }
-
-    [JsonPropertyName("macAddress")]
-    public string? MacAddress { get; set; }
-
-    [JsonPropertyName("name")]
-    public string? Name { get; set; }
-
-    [JsonPropertyName("model")]
-    public string? Model { get; set; }
-
-    [JsonPropertyName("isReachable")]
-    public bool IsReachable { get; set; } = true;
-
-    [JsonPropertyName("discoveredAt")]
-    public DateTime DiscoveredAt { get; set; }
-
-    [JsonPropertyName("error")]
-    public string? Error { get; set; }
-}
-
-public class TestDiscoveredBulbResponse
-{
-    [JsonPropertyName("success")]
-    public bool Success { get; set; }
-
-    [JsonPropertyName("error")]
-    public string? Error { get; set; }
-}
 
 public class HuePairResponse
 {
@@ -183,129 +67,6 @@ public class DiscoveryService : IService
 {
     private static readonly ConcurrentDictionary<string, HuePairingState> HuePairingStates = new();
     private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
-
-    // ── POST /OpenLightFX/Discover ───────────────────────────────────
-
-    public object Post(DiscoverRequest request)
-    {
-        try
-        {
-            var entry = ServerEntryPoint.Instance;
-            if (entry == null)
-                return new DiscoverResponse { Status = "error" };
-
-            var discovered = entry.DiscoveryCoordinator
-                .DiscoverAsync()
-                .GetAwaiter().GetResult();
-
-            entry.DiscoveredBulbStore.Clear();
-            entry.DiscoveredBulbStore.AddRange(discovered);
-
-            var configuredIps = new HashSet<IPAddress>(
-                entry.RoomStore.Bulbs.Select(bulb => bulb.Config.IpAddress));
-
-            var dtos = discovered.Select(b => new DiscoveredBulbDto
-            {
-                Id = b.Id,
-                Protocol = b.Protocol.ToString(),
-                IpAddress = b.IpAddress.ToString(),
-                MacAddress = b.MacAddress,
-                Name = b.Name,
-                Model = b.Model,
-                IsReachable = true,
-                DiscoveredAt = b.DiscoveredAt,
-                IsConfigured = configuredIps.Contains(b.IpAddress)
-            }).ToList();
-
-            return new DiscoverResponse
-            {
-                Status = "scanning",
-                DiscoveredBulbs = dtos
-            };
-        }
-        catch (Exception)
-        {
-            return new DiscoverResponse { Status = "error" };
-        }
-    }
-
-    // ── POST /OpenLightFX/Identify/{BulbId} ──────────────────────────
-
-    public object Post(IdentifyBulbRequest request)
-    {
-        try
-        {
-            var entry = ServerEntryPoint.Instance;
-            if (entry == null)
-                return new IdentifyBulbResponse { Success = false, Error = "Plugin not initialized" };
-
-            var bulb = entry.DiscoveredBulbStore.Get(request.BulbId);
-            if (bulb == null)
-                return new IdentifyBulbResponse { Success = false, Error = "Bulb not found" };
-
-            entry.IdentifyService
-                .IdentifyAsync(bulb)
-                .GetAwaiter().GetResult();
-
-            return new IdentifyBulbResponse { Success = true };
-        }
-        catch (Exception ex)
-        {
-            return new IdentifyBulbResponse { Success = false, Error = ex.Message };
-        }
-    }
-
-    // ── GET /OpenLightFX/Discover/Bulb/{BulbId}/State ────────────────
-
-    public object Get(GetBulbStateRequest request)
-    {
-        var entry = ServerEntryPoint.Instance;
-        if (entry == null)
-            return new BulbStateResponse { Error = "Plugin not initialized" };
-
-        var bulb = entry.DiscoveredBulbStore.Get(request.BulbId);
-        if (bulb == null)
-            return new BulbStateResponse { Error = "Bulb not found" };
-
-        return new BulbStateResponse
-        {
-            Id = bulb.Id,
-            Protocol = bulb.Protocol.ToString(),
-            IpAddress = bulb.IpAddress.ToString(),
-            Port = bulb.Port,
-            MacAddress = bulb.MacAddress,
-            Name = bulb.Name,
-            Model = bulb.Model,
-            IsReachable = true,
-            DiscoveredAt = bulb.DiscoveredAt
-        };
-    }
-
-    // ── POST /OpenLightFX/Discover/Bulb/{BulbId}/Test ────────────────
-
-    public object Post(TestDiscoveredBulbRequest request)
-    {
-        try
-        {
-            var entry = ServerEntryPoint.Instance;
-            if (entry == null)
-                return new TestDiscoveredBulbResponse { Success = false, Error = "Plugin not initialized" };
-
-            var bulb = entry.DiscoveredBulbStore.Get(request.BulbId);
-            if (bulb == null)
-                return new TestDiscoveredBulbResponse { Success = false, Error = "Bulb not found" };
-
-            entry.IdentifyService
-                .IdentifyAsync(bulb)
-                .GetAwaiter().GetResult();
-
-            return new TestDiscoveredBulbResponse { Success = true };
-        }
-        catch (Exception ex)
-        {
-            return new TestDiscoveredBulbResponse { Success = false, Error = ex.Message };
-        }
-    }
 
     // ── POST /OpenLightFX/Hue/Pair ───────────────────────────────────
 

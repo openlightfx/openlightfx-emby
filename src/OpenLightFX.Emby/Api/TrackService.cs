@@ -1,40 +1,17 @@
 namespace OpenLightFX.Emby.Api;
 
 using System.Runtime.Serialization;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Services;
 using OpenLightFX.Emby.Configuration;
-using OpenLightFX.Emby.Drivers;
-using OpenLightFX.Emby.Models;
 using OpenLightFX.Emby.Services;
 
 // ─── Request DTOs ──────────────────────────────────────────────────────
 
-[Route("/OpenLightFX/Status", "GET", Description = "Get current OpenLightFX plugin status")]
-public class GetStatus : IReturn<PluginStatusResponse> { }
-
 [Route("/OpenLightFX/Settings", "GET", Description = "Get all plugin settings")]
 public class GetSettings : IReturn<SettingsResponse> { }
-
-[Route("/OpenLightFX/Settings", "PUT", Description = "Partial update plugin settings")]
-public class UpdateSettings : IReturn<SettingsResponse>
-{
-    public int? GlobalTimeOffsetMs { get; set; }
-    public int? GlobalBrightnessCap { get; set; }
-    public int? LookaheadBufferMs { get; set; }
-    public int? PollIntervalMs { get; set; }
-    public string? StartBehaviorOverride { get; set; }
-    public string? EndBehaviorOverride { get; set; }
-    public string? CreditsBehaviorOverride { get; set; }
-    public bool? PreShowEnabled { get; set; }
-    public bool? PhotosensitivityMode { get; set; }
-    public bool? ShowFlashingWarnings { get; set; }
-    public string? AdditionalScanPaths { get; set; }
-    public string? PluginLogLevel { get; set; }
-}
 
 [Route("/OpenLightFX/Tracks/ByItem", "GET", Description = "Get available .lightfx tracks for a media item")]
 public class GetTracksByItem : IReturn<TrackListResponse>
@@ -43,54 +20,7 @@ public class GetTracksByItem : IReturn<TrackListResponse>
     public string? DeviceId { get; set; }
 }
 
-[Route("/OpenLightFX/Tracks/Select", "POST", Description = "Set or clear the selected track for a media item")]
-public class SelectTrack : IReturn<SelectTrackResponse>
-{
-    public string ItemId { get; set; } = string.Empty;
-    public string? TrackPath { get; set; }
-    public string? DeviceId { get; set; }
-}
-
-[Route("/OpenLightFX/Devices", "GET", Description = "List Emby devices/sessions")]
-public class GetDevices : IReturn<DeviceListResponse> { }
-
-[Route("/OpenLightFX/Bulbs/Test", "GET", Description = "Test connectivity to a configured bulb")]
-public class TestBulb : IReturn<BulbTestResponse>
-{
-    public string BulbId { get; set; } = string.Empty;
-}
-
-[Route("/OpenLightFX/Playback/LightingEnabled", "POST", Description = "Enable or disable lighting for the active session")]
-public class SetLightingEnabled : IReturn<LightingEnabledResponse>
-{
-    public bool Enabled { get; set; } = true;
-}
-
 // ─── Response DTOs ─────────────────────────────────────────────────────
-
-public class PluginStatusResponse
-{
-    [JsonPropertyName("version")]
-    public string Version { get; set; } = string.Empty;
-
-    [JsonPropertyName("activeSessions")]
-    public int ActiveSessions { get; set; }
-
-    [JsonPropertyName("configuredBulbCount")]
-    public int ConfiguredBulbCount { get; set; }
-
-    [JsonPropertyName("sessions")]
-    public List<SessionStatusEntry> Sessions { get; set; } = new();
-}
-
-public class SessionStatusEntry
-{
-    [JsonPropertyName("sessionId")]
-    public string SessionId { get; set; } = string.Empty;
-
-    [JsonPropertyName("lightingEnabled")]
-    public bool LightingEnabled { get; set; }
-}
 
 [DataContract]
 public class SettingsResponse
@@ -188,61 +118,6 @@ public class TrackSummary
     public string FormatVersion { get; set; } = "1.0";
 }
 
-[DataContract]
-public class SelectTrackResponse
-{
-    [DataMember(Name = "itemId")]
-    [JsonPropertyName("itemId")]
-    public string ItemId { get; set; } = string.Empty;
-
-    [DataMember(Name = "trackPath")]
-    [JsonPropertyName("trackPath")]
-    public string? TrackPath { get; set; }
-
-    [DataMember(Name = "deviceId")]
-    [JsonPropertyName("deviceId")]
-    public string? DeviceId { get; set; }
-}
-
-public class DeviceListResponse
-{
-    [JsonPropertyName("devices")]
-    public List<DeviceEntry> Devices { get; set; } = new();
-}
-
-public class DeviceEntry
-{
-    [JsonPropertyName("deviceId")]
-    public string DeviceId { get; set; } = string.Empty;
-
-    [JsonPropertyName("deviceName")]
-    public string DeviceName { get; set; } = string.Empty;
-
-    [JsonPropertyName("client")]
-    public string Client { get; set; } = string.Empty;
-
-    [JsonPropertyName("lastSeen")]
-    public DateTime LastSeen { get; set; }
-}
-
-public class BulbTestResponse
-{
-    [JsonPropertyName("bulbId")]
-    public string BulbId { get; set; } = string.Empty;
-
-    [JsonPropertyName("success")]
-    public bool Success { get; set; }
-
-    [JsonPropertyName("error")]
-    public string? Error { get; set; }
-}
-
-public class LightingEnabledResponse
-{
-    [JsonPropertyName("enabled")]
-    public bool Enabled { get; set; }
-}
-
 // ─── Service ───────────────────────────────────────────────────────────
 
 public class TrackService : IService
@@ -269,99 +144,12 @@ public class TrackService : IService
         _selectionService = new TrackSelectionService(dataPath);
     }
 
-    // ── GET /OpenLightFX/Status ────────────────────────────────────────
-
-    public object Get(GetStatus request)
-    {
-        var bulbCount = ServerEntryPoint.Instance?.RoomStore.Bulbs.Count ?? 0;
-
-        var sessions = ServerEntryPoint.Instance?.GetActiveSessionInfo()
-            .Select(s => new SessionStatusEntry
-            {
-                SessionId = s.SessionId,
-                LightingEnabled = s.LightingEnabled
-            }).ToList() ?? new List<SessionStatusEntry>();
-
-        return new PluginStatusResponse
-        {
-            Version = Plugin.Instance?.GetPluginInfo().Version?.ToString() ?? "unknown",
-            ActiveSessions = sessions.Count,
-            ConfiguredBulbCount = bulbCount,
-            Sessions = sessions
-        };
-    }
-
     // ── GET /OpenLightFX/Settings ──────────────────────────────────────
 
     public object Get(GetSettings request)
     {
         var options = Plugin.Instance?.GetPluginOptions() ?? new PluginOptions();
         return MapOptionsToResponse(options);
-    }
-
-    // ── PUT /OpenLightFX/Settings ──────────────────────────────────────
-
-    public object Put(UpdateSettings request)
-    {
-        try
-        {
-            Plugin.Instance!.UpdateOptions(options =>
-            {
-                if (request.GlobalTimeOffsetMs.HasValue)
-                    options.GlobalTimeOffsetMs = request.GlobalTimeOffsetMs.Value;
-
-                if (request.GlobalBrightnessCap.HasValue)
-                {
-                    var cap = request.GlobalBrightnessCap.Value;
-                    if (cap < 0 || cap > 100)
-                        throw new ArgumentOutOfRangeException(nameof(options.GlobalBrightnessCap),
-                            "globalBrightnessCap must be between 0 and 100");
-                    options.GlobalBrightnessCap = cap;
-                }
-
-                if (request.LookaheadBufferMs.HasValue)
-                    options.LookaheadBufferMs = request.LookaheadBufferMs.Value;
-
-                if (request.PollIntervalMs.HasValue)
-                    options.PollIntervalMs = request.PollIntervalMs.Value;
-
-                if (request.StartBehaviorOverride != null)
-                    options.StartBehaviorOverride = Enum.Parse<BehaviorOverride>(request.StartBehaviorOverride, true);
-
-                if (request.EndBehaviorOverride != null)
-                    options.EndBehaviorOverride = Enum.Parse<BehaviorOverride>(request.EndBehaviorOverride, true);
-
-                if (request.CreditsBehaviorOverride != null)
-                    options.CreditsBehaviorOverride = Enum.Parse<CreditsBehaviorOverride>(request.CreditsBehaviorOverride, true);
-
-                if (request.PreShowEnabled.HasValue)
-                    options.PreShowEnabled = request.PreShowEnabled.Value;
-
-                if (request.PhotosensitivityMode.HasValue)
-                    options.PhotosensitivityMode = request.PhotosensitivityMode.Value;
-
-                if (request.ShowFlashingWarnings.HasValue)
-                    options.ShowFlashingWarnings = request.ShowFlashingWarnings.Value;
-
-                if (request.AdditionalScanPaths != null)
-                    options.AdditionalScanPaths = request.AdditionalScanPaths;
-
-                if (request.PluginLogLevel != null)
-                    options.PluginLogLevel = Enum.Parse<PluginLogLevel>(request.PluginLogLevel, true);
-            });
-
-            var updated = Plugin.Instance.GetPluginOptions();
-            return MapOptionsToResponse(updated);
-        }
-        catch (ArgumentOutOfRangeException ex)
-        {
-            throw new ArgumentException(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.ErrorException("Error updating settings", ex);
-            throw;
-        }
     }
 
     // ── GET /OpenLightFX/Tracks/ByItem ─────────────────────────────────
@@ -414,124 +202,6 @@ public class TrackService : IService
             return new TrackListResponse { ItemId = request.ItemId };
         }
     }
-
-    // ── POST /OpenLightFX/Tracks/Select ────────────────────────────────
-
-    public object Post(SelectTrack request)
-    {
-        try
-        {
-            var selectionService = ServerEntryPoint.Instance?.SelectionService ?? _selectionService;
-
-            if (string.IsNullOrEmpty(request.TrackPath))
-            {
-                selectionService.ClearSelectedTrack(request.ItemId, request.DeviceId);
-            }
-            else
-            {
-                if (!File.Exists(request.TrackPath))
-                    throw new FileNotFoundException($"Track file not found: {request.TrackPath}");
-
-                selectionService.SetSelectedTrack(request.ItemId, request.TrackPath, request.DeviceId);
-            }
-
-            return new SelectTrackResponse
-            {
-                ItemId = request.ItemId,
-                TrackPath = request.TrackPath,
-                DeviceId = request.DeviceId
-            };
-        }
-        catch (FileNotFoundException ex)
-        {
-            _logger.ErrorException("Track file not found for item {0}", ex, request.ItemId);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.ErrorException("Error selecting track for item {0}", ex, request.ItemId);
-            throw;
-        }
-    }
-
-    // ── GET /OpenLightFX/Devices ───────────────────────────────────────
-
-    public object Get(GetDevices request)
-    {
-        try
-        {
-            var sessionManager = ServerEntryPoint.Instance?.SessionManager;
-            if (sessionManager == null)
-                return new DeviceListResponse();
-
-            var sessions = sessionManager.Sessions;
-            var devices = new List<DeviceEntry>();
-            var seen = new HashSet<string>();
-
-            foreach (var session in sessions)
-            {
-                var deviceId = session.DeviceId;
-                if (string.IsNullOrEmpty(deviceId) || !seen.Add(deviceId))
-                    continue;
-
-                devices.Add(new DeviceEntry
-                {
-                    DeviceId = deviceId,
-                    DeviceName = session.DeviceName ?? "",
-                    Client = session.Client ?? "",
-                    LastSeen = session.LastActivityDate.UtcDateTime
-                });
-            }
-
-            return new DeviceListResponse { Devices = devices };
-        }
-        catch (Exception ex)
-        {
-            _logger.ErrorException("Error listing devices", ex);
-            return new DeviceListResponse();
-        }
-    }
-
-    // ── GET /OpenLightFX/Bulbs/Test ────────────────────────────────────
-
-    public async Task<object> Get(TestBulb request)
-    {
-        try
-        {
-            var bulbConfig = ServerEntryPoint.Instance?.RoomStore.FindBulb(request.BulbId)?.Config;
-
-            if (bulbConfig == null)
-                return new BulbTestResponse { BulbId = request.BulbId, Success = false, Error = "Bulb not found" };
-
-            await using var driver = BulbDriverFactory.Create(bulbConfig);
-            var success = await driver.TestConnection();
-
-            return new BulbTestResponse { BulbId = request.BulbId, Success = success };
-        }
-        catch (Exception ex)
-        {
-            _logger.ErrorException("Error testing bulb {0}", ex, request.BulbId);
-            return new BulbTestResponse { BulbId = request.BulbId, Success = false, Error = ex.Message };
-        }
-    }
-
-    // ── POST /OpenLightFX/Playback/LightingEnabled ─────────────────────
-
-    public object Post(SetLightingEnabled request)
-    {
-        var entry = ServerEntryPoint.Instance;
-        if (entry != null)
-        {
-            foreach (var sessionId in entry.ActiveSessionIds)
-            {
-                entry.SetLightingEnabled(sessionId, request.Enabled);
-            }
-        }
-
-        return new LightingEnabledResponse { Enabled = request.Enabled };
-    }
-
-    // ─── Helpers ───────────────────────────────────────────────────────
 
     private static SettingsResponse MapOptionsToResponse(PluginOptions options)
     {
