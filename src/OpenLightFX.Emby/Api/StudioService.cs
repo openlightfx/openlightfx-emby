@@ -652,6 +652,57 @@ public class StudioService : IService, IRequiresRequest
         return GenerationResponse(job, request.AfterSequence ?? 0);
     }
 
+    public object Get(GetStudioSceneCuts request)
+    {
+        var item = RequireItem(request.ItemId);
+        var itemId = PublicItemId(item);
+        var saved = SceneCutStore.Open().TryLoad(itemId);
+        var current = string.IsNullOrEmpty(item.Path) ? null : SceneCutSource.Capture(item.Path);
+        var liveSeconds = item.RunTimeTicks is long ticks && ticks > 0
+            ? ticks / (double)TimeSpan.TicksPerSecond
+            : 0;
+        return SceneCutApi.Response(itemId, saved, current, SceneCutActivity.IsRunning(itemId), liveSeconds);
+    }
+
+    public async Task<object> Post(PostStudioSceneCuts request)
+    {
+        var item = RequireItem(request.ItemId);
+        if (string.IsNullOrEmpty(item.Path))
+            throw new ArgumentException("Movie has no media file");
+        double threshold;
+        try
+        {
+            threshold = SceneCutApi.ResolveThreshold(request.SceneCutThreshold);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw new ArgumentException("Scene cut threshold must be a finite number");
+        }
+
+        var source = await ProbeAsync(item).ConfigureAwait(false);
+        var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
+        var zscale = source.Hdr && await HasZscaleAsync(ffmpeg).ConfigureAwait(false);
+        try
+        {
+            var job = SceneCutDetectionJobs.Start(
+                PublicItemId(item), item.Path, source.RuntimeMs, threshold, ffmpeg,
+                source.Hdr, source.ColorTransfer, zscale, source.VideoStreamIndex, source.Width, source.Height);
+            return SceneCutApi.Job(job);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new ConflictException(ex.Message);
+        }
+    }
+
+    public object Get(GetStudioSceneCutJob request)
+    {
+        var job = SceneCutDetectionJobs.Find(request.JobId);
+        if (job == null)
+            throw new ResourceNotFoundException("Scene cut detection job not found");
+        return SceneCutApi.Job(job);
+    }
+
     private static StudioGenerationResponse GenerationResponse(AiTrackGenerationJob job, int afterSequence)
     {
         var snapshot = job.Snapshot(afterSequence);
