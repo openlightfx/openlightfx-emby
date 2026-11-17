@@ -78,7 +78,8 @@ public class PostStudioGeneration : IReturn<StudioGenerationResponse>
 {
     [DataMember(Name = "itemId")] public string ItemId { get; set; } = "";
     [DataMember(Name = "sampleRateFps")] public double SampleRateFps { get; set; } = 1;
-    [DataMember(Name = "sceneCutThreshold")] public double SceneCutThreshold { get; set; } = 0.35;
+    // Slider is 0.01–1. The job multiplies by 100 to get PySceneDetect's content score (0.27 → 27).
+    [DataMember(Name = "sceneCutThreshold")] public double SceneCutThreshold { get; set; } = ContentDetector.StudioSettingDefault;
     [DataMember(Name = "centerExclusionPercent")] public double CenterExclusionPercent { get; set; }
     [DataMember(Name = "zones")] public List<StudioGenerationZoneRequest> Zones { get; set; } = new();
 }
@@ -628,13 +629,13 @@ public class StudioService : IService, IRequiresRequest
         var zscale = source.Hdr && await HasZscaleAsync(ffmpeg).ConfigureAwait(false);
         var options = new AiTrackGenerationOptions(
             Math.Clamp(request.SampleRateFps, 0.1, 5),
-            Math.Clamp(request.SceneCutThreshold, 0.01, 1),
+            ContentDetector.ThresholdFromStudioSetting(request.SceneCutThreshold),
             Math.Clamp(request.CenterExclusionPercent, 0, 90),
             request.Zones.Select(zone => new AiTrackZone(zone.ChannelId, zone.X, zone.Y, zone.Width, zone.Height)).ToList());
         try
         {
             var job = AiTrackGenerationJobs.Start(
-                PublicItemId(item), item.Path, source.RuntimeMs, options, ffmpeg, source.Hdr, source.ColorTransfer, zscale, source.VideoStreamIndex);
+                PublicItemId(item), item.Path, source.RuntimeMs, options, ffmpeg, source.Hdr, source.ColorTransfer, zscale, source.VideoStreamIndex, source.Width, source.Height);
             return GenerationResponse(job, 0);
         }
         catch (InvalidOperationException ex)
