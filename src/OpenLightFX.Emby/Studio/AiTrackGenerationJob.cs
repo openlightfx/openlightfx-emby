@@ -68,14 +68,35 @@ public static class AiTrackAnalysis
         return sampleTimesMs.Count - 1;
     }
 
+    public static string ToneMap(bool hdr, string? colorTransfer, bool zscale)
+    {
+        if (!hdr) return "";
+        if (!zscale) return "format=p010le,supertonemap=tonemap=hable:desat=0,format=rgb24,";
+        var transfer = StudioFfprobe.IsHlg(colorTransfer) ? "arib-std-b67" : "smpte2084";
+        return "zscale=tin=" + transfer +
+            ":t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0," +
+            "zscale=t=bt709:m=bt709:r=tv,";
+    }
+
+    /// <summary>The cut half of <see cref="Filter"/>, without the label. Detection-only jobs map this alone.</summary>
+    public static string CutBranch(int detectWidth, int detectHeight, string toneMap)
+    {
+        var detect = DetectionFps.ToString("0.###", CultureInfo.InvariantCulture);
+        return $"fps={detect},{toneMap}scale={detectWidth.ToString(CultureInfo.InvariantCulture)}:{detectHeight.ToString(CultureInfo.InvariantCulture)}:flags=bilinear,format=rgb24";
+    }
+
     public static string Filter(int videoStreamIndex, double sampleRateFps, int detectWidth, int detectHeight, string toneMap)
     {
         var sample = sampleRateFps.ToString("0.###", CultureInfo.InvariantCulture);
-        var detect = DetectionFps.ToString("0.###", CultureInfo.InvariantCulture);
-        return $"[0:{videoStreamIndex.ToString(CultureInfo.InvariantCulture)}]split=2[color_in][cut_in];" +
+        var input = videoStreamIndex.ToString(CultureInfo.InvariantCulture);
+        return $"[0:{input}]split=2[color_in][cut_in];" +
             $"[color_in]fps={sample},{toneMap}scale={ColorWidth}:{ColorHeight},format=rgb24[color];" +
-            $"[cut_in]fps={detect},{toneMap}scale={detectWidth.ToString(CultureInfo.InvariantCulture)}:{detectHeight.ToString(CultureInfo.InvariantCulture)}:flags=bilinear,format=rgb24[cut]";
+            $"[cut_in]{CutBranch(detectWidth, detectHeight, toneMap)}[cut]";
     }
+
+    /// <summary>Cut stream only. Same fps, scale, and tonemap as the split graph's <c>[cut]</c> output.</summary>
+    public static string CutFilter(int videoStreamIndex, int detectWidth, int detectHeight, string toneMap) =>
+        $"[0:{videoStreamIndex.ToString(CultureInfo.InvariantCulture)}]{CutBranch(detectWidth, detectHeight, toneMap)}[cut]";
 
     public static StudioGeneratedKeyframe Keyframe(string id, string channelId, long timeMs, (byte R, byte G, byte B) color, bool sceneCut) =>
         new()
@@ -142,6 +163,7 @@ public sealed class AiTrackGenerationJob
             if (_state != "pending") return;
             _state = "processing";
         }
+        SceneCutActivity.Enter(ItemId);
         _ = Task.Run(() => RunAsync(ffmpegPath, hdr, colorTransfer, zscale, videoStreamIndex));
     }
 
@@ -154,13 +176,8 @@ public sealed class AiTrackGenerationJob
         try
         {
             var sampleFps = Math.Clamp(Options.SampleRateFps, 0.1, 5.0);
-            var toneMap = !hdr
-                ? ""
-                : zscale
-                    ? "zscale=tin=" + (StudioFfprobe.IsHlg(colorTransfer) ? "arib-std-b67" : "smpte2084") +
-                      ":t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0," +
-                      "zscale=t=bt709:m=bt709:r=tv,"
-                    : "format=p010le,supertonemap=tonemap=hable:desat=0,format=rgb24,";
+            var toneMap = AiTrackAnalysis.ToneMap(hdr, colorTransfer, zscale);
+            var analyzedSource = SceneCutSource.Capture(VideoPath);
             var filter = AiTrackAnalysis.Filter(videoStreamIndex, sampleFps, detectWidth, detectHeight, toneMap);
             var args = new[]
             {
@@ -178,6 +195,7 @@ public sealed class AiTrackGenerationJob
             var samples = new List<ColorSample>();
             var pendingCuts = new List<int>();
             var seenCuts = new HashSet<int>();
+            var detectedCuts = new List<int>();
             var colorIndex = 0;
             var cutIndex = 0;
             var baselineEmitted = false;
@@ -188,7 +206,10 @@ public sealed class AiTrackGenerationJob
                 foreach (var cut in detector.ProcessFrame(cutFrame, detectWidth, detectHeight))
                 {
                     if (seenCuts.Add(cut))
+                    {
                         pendingCuts.Add(cut);
+                        detectedCuts.Add(cut);
+                    }
                 }
 
                 colorIndex = DrainColors(colorReader, sampleFps, samples, colorIndex);
@@ -210,6 +231,8 @@ public sealed class AiTrackGenerationJob
             if (cutIndex > 0 && samples.Count == 0)
                 throw new InvalidOperationException("ffmpeg could not analyze the movie");
             Publish(samples, pendingCuts, idPrefix, baselineEmitted, detectionComplete: true);
+            SceneCutStore.Open().Save(SceneCutDocument.Create(
+                ItemId, analyzedSource, Options.SceneCutThreshold, detectWidth, DurationMs / 1000.0, detectedCuts));
             lock (_gate)
             {
                 _progress = 1;
@@ -227,6 +250,7 @@ public sealed class AiTrackGenerationJob
         }
         finally
         {
+            SceneCutActivity.Exit(ItemId);
             colorReader?.Dispose();
             if (process is { HasExited: false })
             {

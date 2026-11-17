@@ -39,6 +39,11 @@ namespace OpenLightFX.Emby.Studio;
 /// </summary>
 public sealed class ContentDetector
 {
+    public const string Name = "ContentDetector";
+
+    /// <summary>Bump when the saved cut stream would no longer match this port.</summary>
+    public const string PersistenceVersion = "1";
+
     public const double DefaultThreshold = 27.0;
     public const int DefaultMinSceneLength = 15;
 
