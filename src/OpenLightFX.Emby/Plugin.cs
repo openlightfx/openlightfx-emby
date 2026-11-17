@@ -1,10 +1,12 @@
 using System;
+using Emby.Web.GenericEdit.Elements;
 using MediaBrowser.Common;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Plugins;
 using OpenLightFX.Emby.Configuration;
+using OpenLightFX.Emby.Studio;
 
 namespace OpenLightFX.Emby;
 
@@ -33,6 +35,16 @@ public class Plugin : BasePluginSimpleUI<PluginOptions>
     {
         pageInfo.EnableInMainMenu = true;
         pageInfo.DisplayName = "OpenLightFX";
+        pageInfo.MenuIcon = "lightbulb";
+    }
+
+    protected override PluginOptions OnBeforeShowUI(PluginOptions options)
+    {
+        options.StudioLink ??= new LabelItem();
+        options.StudioLink.Text = "Open OpenLightFX Studio";
+        options.StudioLink.HyperLink = StudioPaths.PublicUrl;
+        options.StudioLink.IsVisible = true;
+        return options;
     }
 
     public PluginOptions GetPluginOptions() => GetOptions();

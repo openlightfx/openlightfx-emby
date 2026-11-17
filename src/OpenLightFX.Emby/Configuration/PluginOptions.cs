@@ -1,7 +1,9 @@
 namespace OpenLightFX.Emby.Configuration;
 
 using global::Emby.Web.GenericEdit;
+using global::Emby.Web.GenericEdit.Elements;
 using MediaBrowser.Model.Attributes;
+using OpenLightFX.Emby.Studio;
 using System.ComponentModel;
 
 public class PluginOptions : EditableOptionsBase
@@ -9,6 +11,12 @@ public class PluginOptions : EditableOptionsBase
     public override string EditorTitle => "OpenLightFX Settings";
     public override string EditorDescription => "Set up rooms and bulbs in OpenLightFX Studio. " +
         "Open the room setup and track editor at /emby/OpenLightFX/studio/.";
+
+    // Refreshed in Plugin.OnBeforeShowUI so a saved copy of this page cannot keep an old URL.
+    public LabelItem StudioLink { get; set; } = new LabelItem("Open OpenLightFX Studio")
+    {
+        HyperLink = StudioPaths.PublicUrl
+    };
 
     // --- Playback Settings ---
     [DisplayName("Global Time Offset (ms)")]

@@ -96,6 +96,8 @@ public class ServerEntryPoint : IServerEntryPoint
         _sessionManager.PlaybackStart += OnPlaybackStart;
         _sessionManager.PlaybackStopped += OnPlaybackStopped;
         _sessionManager.PlaybackProgress += OnPlaybackProgress;
+        _libraryManager.ItemAdded += OnLibraryItemChanged;
+        _libraryManager.ItemUpdated += OnLibraryItemChanged;
 
         var options = GetOptions();
         var intervalMs = Math.Max(options.PollIntervalMs, 100);
@@ -114,6 +116,8 @@ public class ServerEntryPoint : IServerEntryPoint
         _sessionManager.PlaybackStart -= OnPlaybackStart;
         _sessionManager.PlaybackStopped -= OnPlaybackStopped;
         _sessionManager.PlaybackProgress -= OnPlaybackProgress;
+        _libraryManager.ItemAdded -= OnLibraryItemChanged;
+        _libraryManager.ItemUpdated -= OnLibraryItemChanged;
 
         _pollTimer?.Stop();
         _pollTimer?.Dispose();
@@ -135,6 +139,20 @@ public class ServerEntryPoint : IServerEntryPoint
     }
 
     // ─── Event handlers ────────────────────────────────────────────────
+
+    private void OnLibraryItemChanged(object? sender, ItemChangeEventArgs e)
+    {
+        try
+        {
+            // UpdateItem raises ItemUpdated on this same instance. Ensure skips an id that
+            // is already the movie guid, so this handler does not write again.
+            StudioExternalId.Ensure(e.Item, _libraryManager, e.Parent);
+        }
+        catch (Exception ex)
+        {
+            _logger.ErrorException("Error linking movie to OpenLightFX Studio", ex);
+        }
+    }
 
     private void OnPlaybackStart(object? sender, PlaybackProgressEventArgs e)
     {
