@@ -71,9 +71,9 @@ This builds, copies the DLL to the Emby server's plugins directory, and restarts
 
 ## Configuration
 
-After installation, open **Emby Dashboard → Plugins → OpenLightFX → Settings**. The settings page includes an **Open OpenLightFX Studio** link to `/emby/OpenLightFX/studio/`.
+After installation, open **Emby Dashboard → Plugins → OpenLightFX → Settings**. **Open OpenLightFX Studio (bulbs)** goes to `/emby/OpenLightFX/studio/#/bulbs`.
 
-Rooms, bulbs, and tracks are set up in Studio. On a movie's details page, the Links row includes **OpenLightFX Studio**. That link opens the movie in Studio (`/emby/OpenLightFX/studio/#/movie/{itemId}`), where you can pick, create, or import a track. The scheduled task **Link movies to OpenLightFX Studio** runs at startup and adds the link for movies already in the library.
+Rooms, bulbs, and tracks are set up in Studio. On a movie's details page, the Links row includes **OpenLightFX Studio**. That link opens the movie in Studio (`/emby/OpenLightFX/studio/#/movie/{itemId}`), using the same numeric Emby item id as the Studio library. You can pick, create, or import a track there. The scheduled task **Link movies to OpenLightFX Studio** runs at startup and writes that id, including over a previously saved guid.
 
 ### Playback Settings
 

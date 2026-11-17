@@ -1,6 +1,7 @@
 namespace OpenLightFX.Emby.Studio;
 
 using System.Collections.Concurrent;
+using System.Globalization;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Library;
@@ -22,29 +23,42 @@ public class StudioExternalId : IExternalId
     public string Key => ProviderKey;
 
     /// <summary>
-    /// <c>{0}</c> is the provider id. Emby's provider-id reader splits values on
-    /// <c>/</c>, so the id itself is the movie guid with no slashes.
+    /// <c>{0}</c> is the provider id: the movie's numeric Emby id, the same value
+    /// Studio's library uses. Emby's provider-id reader splits values on <c>/</c>.
     /// </summary>
     public string UrlFormatString => StudioPaths.PublicUrl + "#/movie/{0}";
 
     public bool Supports(IHasProviderIds item) => item is Movie;
 
     /// <summary>
-    /// Guid format <c>N</c> (32 hex digits). Emby's API serializes item ids that way,
-    /// and Studio's <c>#/movie/{itemId}</c> route requires an exact match with <c>Id</c>.
+    /// Id Studio's library and <c>#/movie/{itemId}</c> use. Emby exposes
+    /// <see cref="BaseItem.InternalId"/> as the API item id when internal ids are enabled.
     /// </summary>
-    public static string MovieId(BaseItem item) => item.Id.ToString("N");
+    public static string PublicId(BaseItem item) =>
+        item.InternalId > 0
+            ? item.InternalId.ToString(CultureInfo.InvariantCulture)
+            : item.Id.ToString("N");
 
     /// <summary>
-    /// Sets the provider id when it is missing or different. Returns false when the
-    /// movie already points at itself, so a follow-up <c>ItemUpdated</c> does not save again.
+    /// Numeric id for the Links row. Null until Emby has assigned <see cref="BaseItem.InternalId"/>,
+    /// so a guid is never written in its place.
+    /// </summary>
+    public static string? MovieLinkId(BaseItem item) =>
+        item is Movie && item.InternalId > 0
+            ? item.InternalId.ToString(CultureInfo.InvariantCulture)
+            : null;
+
+    /// <summary>
+    /// Sets the provider id when it is missing or not the numeric Emby id.
+    /// A stored guid is replaced. Returns false when no write is needed, so a
+    /// follow-up <c>ItemUpdated</c> does not save again.
     /// </summary>
     public static bool TryAssign(BaseItem item)
     {
-        if (item is not Movie || item.Id == Guid.Empty)
+        var id = MovieLinkId(item);
+        if (id == null)
             return false;
 
-        var id = MovieId(item);
         if (string.Equals(item.GetProviderId(ProviderKey), id, StringComparison.Ordinal))
             return false;
 

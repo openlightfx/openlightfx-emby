@@ -145,7 +145,7 @@ public class ServerEntryPoint : IServerEntryPoint
         try
         {
             // UpdateItem raises ItemUpdated on this same instance. Ensure skips an id that
-            // is already the movie guid, so this handler does not write again.
+            // already matches the movie's numeric Emby id, and rewrites a stored guid.
             StudioExternalId.Ensure(e.Item, _libraryManager, e.Parent);
         }
         catch (Exception ex)

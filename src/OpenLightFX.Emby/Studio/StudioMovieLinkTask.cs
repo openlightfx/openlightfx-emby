@@ -8,8 +8,8 @@ using MediaBrowser.Model.Tasks;
 
 /// <summary>
 /// One pass over movies that already exist when the plugin starts. New and edited
-/// movies are linked from <see cref="ServerEntryPoint"/>; this task fills the rest.
-/// Startup runs it each boot, and a movie that already has the right id is skipped.
+/// movies are linked from <see cref="ServerEntryPoint"/>. Startup runs it each boot.
+/// A movie whose link is missing or still a guid is rewritten to its numeric Emby id.
 /// </summary>
 public class StudioMovieLinkTask : IScheduledTask
 {
@@ -27,7 +27,7 @@ public class StudioMovieLinkTask : IScheduledTask
     public string Key => "OpenLightFXStudioMovieLinks";
 
     public string Description =>
-        "Adds an OpenLightFX Studio link to each movie that does not already have one.";
+        "Sets each movie's OpenLightFX Studio link to its numeric Emby id, and replaces a link that still uses the movie guid.";
 
     public string Category => "OpenLightFX";
 

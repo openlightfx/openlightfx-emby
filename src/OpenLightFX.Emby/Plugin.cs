@@ -41,8 +41,8 @@ public class Plugin : BasePluginSimpleUI<PluginOptions>
     protected override PluginOptions OnBeforeShowUI(PluginOptions options)
     {
         options.StudioLink ??= new LabelItem();
-        options.StudioLink.Text = "Open OpenLightFX Studio";
-        options.StudioLink.HyperLink = StudioPaths.PublicUrl;
+        options.StudioLink.Text = "Open OpenLightFX Studio (bulbs)";
+        options.StudioLink.HyperLink = StudioPaths.BulbsUrl;
         options.StudioLink.IsVisible = true;
         return options;
     }

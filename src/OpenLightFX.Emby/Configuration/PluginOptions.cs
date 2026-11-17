@@ -13,9 +13,9 @@ public class PluginOptions : EditableOptionsBase
         "Open the room setup and track editor at /emby/OpenLightFX/studio/.";
 
     // Refreshed in Plugin.OnBeforeShowUI so a saved copy of this page cannot keep an old URL.
-    public LabelItem StudioLink { get; set; } = new LabelItem("Open OpenLightFX Studio")
+    public LabelItem StudioLink { get; set; } = new LabelItem("Open OpenLightFX Studio (bulbs)")
     {
-        HyperLink = StudioPaths.PublicUrl
+        HyperLink = StudioPaths.BulbsUrl
     };
 
     // --- Playback Settings ---

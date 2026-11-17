@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Drawing;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Net;
@@ -39,6 +40,13 @@ public class GetStudioItems : IReturn<List<StudioItemResponse>>
     public string? Search { get; set; }
     public int? StartIndex { get; set; }
     public int? Limit { get; set; }
+}
+
+[Route("/OpenLightFX/Studio/Items/{ItemId}", "GET", Description = "One Emby movie for Studio, by numeric id or guid")]
+[Authenticated]
+public class GetStudioItem : IReturn<StudioItemResponse>
+{
+    public string ItemId { get; set; } = "";
 }
 
 [Route("/OpenLightFX/Studio/Items/{ItemId}/StreamUrl", "GET", Description = "Browser-playable video URL for a movie")]
@@ -514,28 +522,38 @@ public class StudioService : IService, IRequiresRequest
         var requestUri = Request?.AbsoluteUri;
         return items
             .Where(item => !string.IsNullOrEmpty(item.Path))
-            .Select(item =>
-            {
-                var itemId = PublicItemId(item);
-                var tag = PrimaryImageTag(item);
-                var tracks = Discover(item);
-                var activePath = ServerEntryPoint.Instance?.SelectionService.GetGlobalSelectedTrack(itemId);
-                return new StudioItemResponse
-                {
-                    ItemId = itemId,
-                    Name = item.Name ?? "",
-                    Year = item.ProductionYear ?? 0,
-                    RuntimeMs = item.RunTimeTicks is long ticks
-                        ? ticks / TimeSpan.TicksPerMillisecond
-                        : 0,
-                    PrimaryImageTag = tag,
-                    PosterUrl = StudioPosters.PosterUrl(requestUri, itemId, tag),
-                    DateAdded = item.DateCreated.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture),
-                    TrackCount = tracks.Count,
-                    HasActiveTrack = !string.IsNullOrEmpty(activePath) && tracks.Any(track => PathsEqual(track.FilePath, activePath))
-                };
-            })
+            .Select(item => ToStudioItem(item, requestUri))
             .ToList();
+    }
+
+    public object Get(GetStudioItem request)
+    {
+        var item = FindItem(request.ItemId);
+        if (item is not Movie || string.IsNullOrEmpty(item.Path))
+            throw new ResourceNotFoundException("Movie not found");
+        return ToStudioItem(item, Request?.AbsoluteUri);
+    }
+
+    private StudioItemResponse ToStudioItem(BaseItem item, string? requestUri)
+    {
+        var itemId = PublicItemId(item);
+        var tag = PrimaryImageTag(item);
+        var tracks = Discover(item);
+        var activePath = ServerEntryPoint.Instance?.SelectionService.GetGlobalSelectedTrack(itemId);
+        return new StudioItemResponse
+        {
+            ItemId = itemId,
+            Name = item.Name ?? "",
+            Year = item.ProductionYear ?? 0,
+            RuntimeMs = item.RunTimeTicks is long ticks
+                ? ticks / TimeSpan.TicksPerMillisecond
+                : 0,
+            PrimaryImageTag = tag,
+            PosterUrl = StudioPosters.PosterUrl(requestUri, itemId, tag),
+            DateAdded = item.DateCreated.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture),
+            TrackCount = tracks.Count,
+            HasActiveTrack = !string.IsNullOrEmpty(activePath) && tracks.Any(track => PathsEqual(track.FilePath, activePath))
+        };
     }
 
     private static bool PathsEqual(string left, string right)
@@ -1351,8 +1369,7 @@ public class StudioService : IService, IRequiresRequest
         return token.Length == 0 ? "item" : token;
     }
 
-    private static string PublicItemId(BaseItem item) =>
-        item.InternalId > 0 ? item.InternalId.ToString() : item.Id.ToString("N");
+    private static string PublicItemId(BaseItem item) => StudioExternalId.PublicId(item);
 
     private List<Models.BulbConfig> LoadBulbs() =>
         ServerEntryPoint.Instance?.RoomStore.Bulbs.Select(bulb => bulb.Config).ToList() ?? new List<Models.BulbConfig>();

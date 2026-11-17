@@ -11,4 +11,7 @@ public static class StudioPaths
 
     /// <summary>URL path opened from the dashboard. Emby's default base path is /emby.</summary>
     public const string PublicUrl = "/emby/OpenLightFX/studio/";
+
+    /// <summary>Studio bulbs screen. Relative, so it stays on the server that served the page.</summary>
+    public const string BulbsUrl = PublicUrl + "#/bulbs";
 }
