@@ -12,11 +12,17 @@ public sealed record AiTrackZone(string ChannelId, double X, double Y, double Wi
 /// <param name="SceneCutThreshold">
 /// PySceneDetect content score. Studio sends 0.01–1 and the service multiplies by 100, so 0.27 is the upstream default of 27.
 /// </param>
+/// <param name="Fades">Ramp zone keyframes through detected fades to or from black or white.</param>
+/// <param name="LightningChannels">Track channels that receive a lightning effect. Empty skips lightning.</param>
+/// <param name="SirenChannels">Track channels that receive a siren. Two channels swap red and blue.</param>
 public sealed record AiTrackGenerationOptions(
     double SampleRateFps,
     double SceneCutThreshold,
     double CenterExclusionPercent,
-    IReadOnlyList<AiTrackZone> Zones);
+    IReadOnlyList<AiTrackZone> Zones,
+    bool Fades = false,
+    IReadOnlyList<string>? LightningChannels = null,
+    IReadOnlyList<string>? SirenChannels = null);
 
 /// <summary>
 /// Frame sizes and the ffmpeg graph for keyframe generation. Colour is read from the
@@ -95,6 +101,7 @@ public static class AiTrackAnalysis
             G = color.G,
             B = color.B,
             TransitionMs = (uint)Math.Min(sceneCut ? 200 : 1500, Math.Max(0, timeMs)),
+            Brightness = 100,
             PowerOn = (0.299 * color.R + 0.587 * color.G + 0.114 * color.B) >= 8
         };
 
@@ -106,6 +113,7 @@ public sealed class AiTrackGenerationJob
 {
     private readonly object _gate = new();
     private readonly List<StudioGeneratedKeyframe> _keyframes = new();
+    private readonly List<StudioGeneratedEffect> _effects = new();
     private readonly int _sourceWidth;
     private readonly int _sourceHeight;
     private string _state = "pending";
@@ -132,14 +140,14 @@ public sealed class AiTrackGenerationJob
 
     public string State { get { lock (_gate) return _state; } }
 
-    public (string State, string Error, double Progress, long ThroughMs, int Count, List<StudioGeneratedKeyframe> NewKeyframes)
+    public (string State, string Error, double Progress, long ThroughMs, int Count, List<StudioGeneratedKeyframe> NewKeyframes, List<StudioGeneratedEffect> Effects)
         Snapshot(int afterSequence)
     {
         lock (_gate)
         {
             var start = Math.Clamp(afterSequence, 0, _keyframes.Count);
             return (_state, _error, _progress, _throughMs, _keyframes.Count,
-                _keyframes.Skip(start).ToList());
+                _keyframes.Skip(start).ToList(), _effects.ToList());
         }
     }
 
@@ -175,6 +183,7 @@ public sealed class AiTrackGenerationJob
             var detector = new ContentDetector(Options.SceneCutThreshold);
             var cutFrame = new byte[detectWidth * detectHeight * 3];
             var colors = new SceneColorAccumulator(Options.Zones, Options.CenterExclusionPercent, detectWidth, detectHeight);
+            var prefill = new EffectPrefill();
             var seenCuts = new HashSet<int>();
             var detectedCuts = new List<int>();
             var cutIndex = 0;
@@ -185,11 +194,12 @@ public sealed class AiTrackGenerationJob
             while (await ReadFrameAsync(process.StandardOutput.BaseStream, cutFrame).ConfigureAwait(false))
             {
                 colors.Observe(cutIndex, cutFrame);
+                prefill.Observe(cutFrame, detectWidth, detectHeight);
                 foreach (var cut in detector.ProcessFrame(cutFrame, detectWidth, detectHeight))
                 {
                     if (!seenCuts.Add(cut) || cut <= sceneStart) continue;
                     detectedCuts.Add(cut);
-                    EmitScene(colors, idPrefix, sceneStart, cut, opening);
+                    EmitScene(colors, prefill, idPrefix, sceneStart, cut, opening);
                     opening = false;
                     sceneStart = cut;
                 }
@@ -208,7 +218,8 @@ public sealed class AiTrackGenerationJob
             if (process.ExitCode != 0)
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "ffmpeg could not analyze the movie" : "ffmpeg could not analyze the movie");
             if (cutIndex > sceneStart)
-                EmitScene(colors, idPrefix, sceneStart, cutIndex, opening);
+                EmitScene(colors, prefill, idPrefix, sceneStart, cutIndex, opening);
+            AddPrefillEffects(prefill, detectedCuts, cutIndex, idPrefix);
             SceneCutStore.Open().Save(SceneCutDocument.Create(
                 ItemId, analyzedSource, Options.SceneCutThreshold, detectWidth, DurationMs / 1000.0, detectedCuts));
             lock (_gate)
@@ -237,26 +248,169 @@ public sealed class AiTrackGenerationJob
         }
     }
 
-    private void EmitScene(SceneColorAccumulator colors, string idPrefix, int sceneStart, int sceneEnd, bool opening)
+    private void EmitScene(SceneColorAccumulator colors, EffectPrefill prefill, string idPrefix, int sceneStart, int sceneEnd, bool opening)
     {
-        var timeMs = opening ? 0 : AiTrackAnalysis.FrameTimeMs(sceneStart, AiTrackAnalysis.DetectionFps);
+        var sceneColors = colors.Close(sceneEnd);
+        var startMs = opening ? 0 : AiTrackAnalysis.FrameTimeMs(sceneStart, AiTrackAnalysis.DetectionFps);
+        var colorMs = startMs;
+        uint transition = 0;
+        var shaped = false;
+        if (Options.Fades && prefill.TryFadeIn(sceneStart, sceneEnd, out var fadeEnd, out var fromWhite))
+        {
+            colorMs = AiTrackAnalysis.FrameTimeMs(fadeEnd, AiTrackAnalysis.DetectionFps);
+            transition = (uint)Math.Max(0, colorMs - startMs);
+            AddHold(idPrefix, sceneStart, startMs, fromWhite);
+            shaped = true;
+        }
+
         var token = opening ? "c0" : "d" + sceneStart.ToString(CultureInfo.InvariantCulture);
-        AddKeyframes(idPrefix, token, timeMs, colors.Close(sceneEnd), sceneCut: !opening);
+        if (!shaped)
+            AddKeyframes(idPrefix, token, startMs, sceneColors, sceneCut: !opening);
+        else
+            AddKeyframes(idPrefix, token, colorMs, sceneColors, sceneCut: false, transition);
+
+        if (Options.Fades && prefill.TryFadeOut(sceneStart, sceneEnd, out var fadeStart, out var toWhite))
+        {
+            var endMs = AiTrackAnalysis.FrameTimeMs(Math.Max(sceneStart, sceneEnd - 1), AiTrackAnalysis.DetectionFps);
+            var fadeMs = AiTrackAnalysis.FrameTimeMs(fadeStart, AiTrackAnalysis.DetectionFps);
+            AddFadeEnd(idPrefix, sceneEnd, endMs, (uint)Math.Max(0, endMs - fadeMs), toWhite);
+        }
     }
 
-    private void AddKeyframes(string idPrefix, string token, long timeMs, Dictionary<string, (byte R, byte G, byte B)> colors, bool sceneCut)
+    private void AddPrefillEffects(EffectPrefill prefill, IReadOnlyList<int> cuts, int frameCount, string idPrefix)
+    {
+        var lightning = Targets(Options.LightningChannels);
+        var siren = Targets(Options.SirenChannels);
+        if (lightning.Count == 0 && siren.Count == 0) return;
+        var generated = new List<StudioGeneratedEffect>();
+        if (lightning.Count > 0)
+        {
+            foreach (var hit in prefill.Lightning(cuts))
+            {
+                var timeMs = AiTrackAnalysis.FrameTimeMs(hit.Frame, AiTrackAnalysis.DetectionFps);
+                var intensity = (int)Math.Clamp(Math.Round(hit.Confidence * 100), 40, 100);
+                foreach (var channel in lightning)
+                {
+                    generated.Add(new StudioGeneratedEffect
+                    {
+                        Id = $"ai-gen-{idPrefix}-lightning-{channel}-{hit.Frame}",
+                        ChannelId = channel,
+                        TimestampMs = timeMs,
+                        DurationMs = 800,
+                        EffectType = "LIGHTNING",
+                        Intensity = intensity,
+                        R = 255, G = 255, B = 255,
+                        SecondaryR = 255, SecondaryG = 180, SecondaryB = 80,
+                        FlashCount = 2,
+                        DecayMs = 500
+                    });
+                }
+            }
+        }
+
+        if (siren.Count > 0)
+        {
+            foreach (var run in prefill.Sirens())
+            {
+                var timeMs = AiTrackAnalysis.FrameTimeMs(run.StartFrame, AiTrackAnalysis.DetectionFps);
+                var duration = Math.Max(1, AiTrackAnalysis.FrameTimeMs(run.EndFrame, AiTrackAnalysis.DetectionFps) - timeMs);
+                for (var i = 0; i < siren.Count; i++)
+                {
+                    var redFirst = siren.Count == 1 || i % 2 == 0;
+                    generated.Add(new StudioGeneratedEffect
+                    {
+                        Id = $"ai-gen-{idPrefix}-siren-{siren[i]}-{run.StartFrame}",
+                        ChannelId = siren[i],
+                        TimestampMs = timeMs,
+                        DurationMs = duration,
+                        EffectType = "SIREN",
+                        Intensity = 80,
+                        R = (byte)(redFirst ? 255 : 0),
+                        G = 0,
+                        B = (byte)(redFirst ? 0 : 255),
+                        SecondaryR = (byte)(redFirst ? 0 : 255),
+                        SecondaryG = 0,
+                        SecondaryB = (byte)(redFirst ? 255 : 0),
+                        PulseRateHz = run.RateHz
+                    });
+                }
+            }
+        }
+
+        if (generated.Count == 0 || frameCount < 0) return;
+        lock (_gate) _effects.AddRange(generated);
+    }
+
+    private List<string> Targets(IReadOnlyList<string>? requested)
+    {
+        if (requested == null || requested.Count == 0) return new List<string>();
+        var zones = new HashSet<string>(Options.Zones.Select(zone => zone.ChannelId), StringComparer.Ordinal);
+        return requested.Where(zones.Contains).Distinct(StringComparer.Ordinal).ToList();
+    }
+
+    private void AddHold(string idPrefix, int sceneStart, long timeMs, bool white)
+    {
+        var generated = new List<StudioGeneratedKeyframe>();
+        foreach (var zone in Options.Zones)
+        {
+            if (HasKeyframeNear(zone.ChannelId, timeMs, 80)) continue;
+            var color = white ? ((byte)255, (byte)255, (byte)255) : ((byte)0, (byte)0, (byte)0);
+            var frame = AiTrackAnalysis.Keyframe(
+                $"ai-gen-{idPrefix}-fade-{zone.ChannelId}-in-{sceneStart}",
+                zone.ChannelId, timeMs, color, sceneCut: false);
+            frame.TransitionMs = 0;
+            frame.Brightness = white ? 100 : 0;
+            frame.PowerOn = white;
+            generated.Add(frame);
+        }
+
+        lock (_gate) _keyframes.AddRange(generated);
+    }
+
+    private void AddFadeEnd(string idPrefix, int sceneEnd, long timeMs, uint transitionMs, bool white)
+    {
+        var generated = new List<StudioGeneratedKeyframe>();
+        foreach (var zone in Options.Zones)
+        {
+            if (HasKeyframeNear(zone.ChannelId, timeMs, 80)) continue;
+            var color = white ? ((byte)255, (byte)255, (byte)255) : ((byte)0, (byte)0, (byte)0);
+            var frame = AiTrackAnalysis.Keyframe(
+                $"ai-gen-{idPrefix}-fade-{zone.ChannelId}-out-{sceneEnd}",
+                zone.ChannelId, timeMs, color, sceneCut: true);
+            frame.TransitionMs = transitionMs;
+            frame.Brightness = white ? 100 : 0;
+            frame.PowerOn = white;
+            generated.Add(frame);
+        }
+
+        lock (_gate) _keyframes.AddRange(generated);
+    }
+
+    private bool HasKeyframeNear(string channelId, long timeMs, long withinMs)
+    {
+        lock (_gate)
+        {
+            return _keyframes.Any(frame => frame.ChannelId == channelId
+                && Math.Abs(frame.TimestampMs - timeMs) <= withinMs);
+        }
+    }
+
+    private void AddKeyframes(string idPrefix, string token, long timeMs, Dictionary<string, (byte R, byte G, byte B)> colors, bool sceneCut, uint? transitionMs = null)
     {
         var generated = new List<StudioGeneratedKeyframe>(Options.Zones.Count);
         foreach (var zone in Options.Zones)
         {
             if (!colors.TryGetValue(zone.ChannelId, out var color))
                 continue;
-            generated.Add(AiTrackAnalysis.Keyframe(
+            var frame = AiTrackAnalysis.Keyframe(
                 $"ai-gen-{idPrefix}-{zone.ChannelId}-{token}",
                 zone.ChannelId,
                 timeMs,
                 color,
-                sceneCut));
+                sceneCut);
+            if (transitionMs is uint transition)
+                frame.TransitionMs = transition;
+            generated.Add(frame);
         }
 
         lock (_gate)
@@ -286,8 +440,29 @@ public sealed class StudioGeneratedKeyframe
     [System.Runtime.Serialization.DataMember(Name = "r"), System.Text.Json.Serialization.JsonPropertyName("r")] public byte R { get; set; }
     [System.Runtime.Serialization.DataMember(Name = "g"), System.Text.Json.Serialization.JsonPropertyName("g")] public byte G { get; set; }
     [System.Runtime.Serialization.DataMember(Name = "b"), System.Text.Json.Serialization.JsonPropertyName("b")] public byte B { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "brightness"), System.Text.Json.Serialization.JsonPropertyName("brightness")] public int Brightness { get; set; } = 100;
     [System.Runtime.Serialization.DataMember(Name = "transitionMs"), System.Text.Json.Serialization.JsonPropertyName("transitionMs")] public uint TransitionMs { get; set; }
     [System.Runtime.Serialization.DataMember(Name = "powerOn"), System.Text.Json.Serialization.JsonPropertyName("powerOn")] public bool PowerOn { get; set; }
+}
+
+[System.Runtime.Serialization.DataContract]
+public sealed class StudioGeneratedEffect
+{
+    [System.Runtime.Serialization.DataMember(Name = "id"), System.Text.Json.Serialization.JsonPropertyName("id")] public string Id { get; set; } = "";
+    [System.Runtime.Serialization.DataMember(Name = "channelId"), System.Text.Json.Serialization.JsonPropertyName("channelId")] public string ChannelId { get; set; } = "";
+    [System.Runtime.Serialization.DataMember(Name = "timestampMs"), System.Text.Json.Serialization.JsonPropertyName("timestampMs")] public long TimestampMs { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "durationMs"), System.Text.Json.Serialization.JsonPropertyName("durationMs")] public long DurationMs { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "effectType"), System.Text.Json.Serialization.JsonPropertyName("effectType")] public string EffectType { get; set; } = "";
+    [System.Runtime.Serialization.DataMember(Name = "intensity"), System.Text.Json.Serialization.JsonPropertyName("intensity")] public int Intensity { get; set; } = 100;
+    [System.Runtime.Serialization.DataMember(Name = "r"), System.Text.Json.Serialization.JsonPropertyName("r")] public byte R { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "g"), System.Text.Json.Serialization.JsonPropertyName("g")] public byte G { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "b"), System.Text.Json.Serialization.JsonPropertyName("b")] public byte B { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "secondaryR"), System.Text.Json.Serialization.JsonPropertyName("secondaryR")] public byte SecondaryR { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "secondaryG"), System.Text.Json.Serialization.JsonPropertyName("secondaryG")] public byte SecondaryG { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "secondaryB"), System.Text.Json.Serialization.JsonPropertyName("secondaryB")] public byte SecondaryB { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "pulseRateHz"), System.Text.Json.Serialization.JsonPropertyName("pulseRateHz")] public double PulseRateHz { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "flashCount"), System.Text.Json.Serialization.JsonPropertyName("flashCount")] public int FlashCount { get; set; }
+    [System.Runtime.Serialization.DataMember(Name = "decayMs"), System.Text.Json.Serialization.JsonPropertyName("decayMs")] public int DecayMs { get; set; }
 }
 
 public static class AiTrackGenerationJobs

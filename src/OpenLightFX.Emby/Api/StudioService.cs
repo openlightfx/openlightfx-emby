@@ -82,6 +82,10 @@ public class PostStudioGeneration : IReturn<StudioGenerationResponse>
     [DataMember(Name = "sceneCutThreshold")] public double SceneCutThreshold { get; set; } = ContentDetector.StudioSettingDefault;
     [DataMember(Name = "centerExclusionPercent")] public double CenterExclusionPercent { get; set; }
     [DataMember(Name = "zones")] public List<StudioGenerationZoneRequest> Zones { get; set; } = new();
+    // Fade the zone keyframes. Lightning and siren play on these track channels; empty means skip that effect.
+    [DataMember(Name = "fades")] public bool Fades { get; set; }
+    [DataMember(Name = "lightningChannels")] public List<string> LightningChannels { get; set; } = new();
+    [DataMember(Name = "sirenChannels")] public List<string> SirenChannels { get; set; } = new();
 }
 
 [DataContract]
@@ -360,6 +364,8 @@ public class StudioGenerationResponse
     [DataMember(Name = "throughMs"), JsonPropertyName("throughMs")] public long ThroughMs { get; set; }
     [DataMember(Name = "sequence"), JsonPropertyName("sequence")] public int Sequence { get; set; }
     [DataMember(Name = "keyframes"), JsonPropertyName("keyframes")] public List<StudioGeneratedKeyframe> Keyframes { get; set; } = new();
+    // Full set of prefilled effects so far, not a delta. Lightning and siren only.
+    [DataMember(Name = "effects"), JsonPropertyName("effects")] public List<StudioGeneratedEffect> Effects { get; set; } = new();
 }
 
 [DataContract]
@@ -623,6 +629,9 @@ public class StudioService : IService, IRequiresRequest
             throw new ArgumentException("A sampling zone is outside the video frame");
         if (request.Zones.Select(zone => zone.ChannelId).Distinct(StringComparer.Ordinal).Count() != request.Zones.Count)
             throw new ArgumentException("Each channel can have only one sampling zone");
+        var zoneIds = request.Zones.Select(zone => zone.ChannelId).ToHashSet(StringComparer.Ordinal);
+        var lightning = EffectChannels(request.LightningChannels, zoneIds, "Lightning");
+        var siren = EffectChannels(request.SirenChannels, zoneIds, "Siren");
 
         var source = await ProbeAsync(item).ConfigureAwait(false);
         var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
@@ -631,7 +640,10 @@ public class StudioService : IService, IRequiresRequest
             Math.Clamp(request.SampleRateFps, 0.1, 5),
             ContentDetector.ThresholdFromStudioSetting(request.SceneCutThreshold),
             Math.Clamp(request.CenterExclusionPercent, 0, 90),
-            request.Zones.Select(zone => new AiTrackZone(zone.ChannelId, zone.X, zone.Y, zone.Width, zone.Height)).ToList());
+            request.Zones.Select(zone => new AiTrackZone(zone.ChannelId, zone.X, zone.Y, zone.Width, zone.Height)).ToList(),
+            request.Fades,
+            lightning,
+            siren);
         try
         {
             var job = AiTrackGenerationJobs.Start(
@@ -714,8 +726,23 @@ public class StudioService : IService, IRequiresRequest
             Progress = snapshot.Progress,
             ThroughMs = snapshot.ThroughMs,
             Sequence = snapshot.Count,
-            Keyframes = snapshot.NewKeyframes
+            Keyframes = snapshot.NewKeyframes,
+            Effects = snapshot.Effects
         };
+    }
+
+    private static List<string> EffectChannels(List<string>? requested, HashSet<string> zoneIds, string label)
+    {
+        if (requested == null || requested.Count == 0) return new List<string>();
+        var distinct = requested
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (distinct.Count > 6)
+            throw new ArgumentException(label + " can target at most six channels");
+        if (distinct.Any(id => !zoneIds.Contains(id)))
+            throw new ArgumentException(label + " must use a track channel that has a sampling zone");
+        return distinct;
     }
 
     public async Task<object> Get(GetStudioFrame request)
