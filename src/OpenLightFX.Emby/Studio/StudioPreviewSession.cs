@@ -37,9 +37,10 @@ public sealed record StudioPreviewBulb(
     BulbState? PriorState);
 
 /// <summary>
-/// Drives real bulbs for the Studio editor. Frames are coalesced per bulb, rate-limited
-/// to the driver's minimum transition and command rate, and optionally passed through
-/// <see cref="PhotosensitivityFilter"/>. Idle previews restore the captured bulb state.
+/// Drives real bulbs for the Studio editor. Frames are rate-limited to the driver's
+/// minimum transition and command rate. Within a closed window the brightest frame
+/// is kept, and the latest dimmer frame is sent on the following tick, so a flash
+/// is not replaced by the sample after it. Idle previews restore the captured bulb state.
 /// </summary>
 public sealed class StudioPreviewSession : IAsyncDisposable
 {
@@ -60,6 +61,7 @@ public sealed class StudioPreviewSession : IAsyncDisposable
         public required TimeSpan Interval { get; init; }
         public List<EffectCommand> Raw { get; } = new();
         public EffectCommand? Pending { get; set; }
+        public EffectCommand? Follow { get; set; }
         public DateTimeOffset NextAllowed { get; set; }
     }
 
@@ -194,18 +196,12 @@ public sealed class StudioPreviewSession : IAsyncDisposable
                     continue;
 
                 var command = Shape(lane, sample, now);
-                if (now >= lane.NextAllowed)
-                {
-                    lane.Pending = null;
-                    lane.NextAllowed = now + lane.Interval;
-                    Commit(lane, command);
-                    due.Add((lane, command));
-                }
-                else
-                {
-                    // Latest frame wins until the bulb can accept another command.
-                    lane.Pending = command;
-                }
+                var sending = TakeForSend(lane, command, now);
+                if (sending == null)
+                    continue;
+
+                Commit(lane, sending);
+                due.Add((lane, sending));
             }
 
             foreach (var (lane, command) in due)
@@ -234,11 +230,12 @@ public sealed class StudioPreviewSession : IAsyncDisposable
             var due = new List<(Lane Lane, EffectCommand Command)>();
             foreach (var lane in _lanes.Values)
             {
-                if (lane.Pending == null || now < lane.NextAllowed)
+                var command = lane.Pending;
+                if (command == null || now < lane.NextAllowed)
                     continue;
 
-                var command = lane.Pending;
-                lane.Pending = null;
+                lane.Pending = lane.Follow;
+                lane.Follow = null;
                 lane.NextAllowed = now + lane.Interval;
                 Commit(lane, command);
                 due.Add((lane, command));
@@ -289,6 +286,51 @@ public sealed class StudioPreviewSession : IAsyncDisposable
             try { await lane.Driver.DisposeAsync().ConfigureAwait(false); }
             catch { /* already closed */ }
         }
+    }
+
+    /// <summary>
+    /// Sends immediately when the bulb can accept a command. While it cannot,
+    /// keeps the brightest frame so a peak is not replaced by a later dip, and
+    /// remembers the latest dimmer frame to send on the next tick.
+    /// </summary>
+    private static EffectCommand? TakeForSend(Lane lane, EffectCommand command, DateTimeOffset now)
+    {
+        if (now < lane.NextAllowed)
+        {
+            Hold(lane, command);
+            return null;
+        }
+
+        var send = command;
+        EffectCommand? queued = null;
+        if (lane.Pending is { } pending && pending.Brightness > command.Brightness)
+        {
+            send = pending;
+            queued = command;
+        }
+
+        lane.Pending = queued;
+        lane.Follow = null;
+        lane.NextAllowed = now + lane.Interval;
+        return send;
+    }
+
+    private static void Hold(Lane lane, EffectCommand command)
+    {
+        if (lane.Pending == null || command.Brightness > lane.Pending.Brightness)
+        {
+            lane.Pending = command;
+            lane.Follow = null;
+            return;
+        }
+
+        if (command.Brightness < lane.Pending.Brightness)
+        {
+            lane.Follow = command;
+            return;
+        }
+
+        lane.Pending = command;
     }
 
     private EffectCommand Shape(Lane lane, StudioPreviewSample sample, DateTimeOffset now)

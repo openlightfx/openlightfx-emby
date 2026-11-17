@@ -20,25 +20,32 @@
           "brightness": 100
         },
         {
-          "offsetMs": 50,
-          "r": 255,
-          "g": 255,
-          "b": 255,
-          "brightness": 0
-        },
-        {
-          "offsetMs": 100,
+          "offsetMs": 120,
           "r": 255,
           "g": 180,
           "b": 80,
           "brightness": 40
         },
         {
-          "offsetMs": 150,
+          "offsetMs": 240,
           "r": 255,
           "g": 180,
           "b": 80,
-          "brightness": 0
+          "brightness": 31
+        },
+        {
+          "offsetMs": 360,
+          "r": 255,
+          "g": 180,
+          "b": 80,
+          "brightness": 23
+        },
+        {
+          "offsetMs": 480,
+          "r": 255,
+          "g": 180,
+          "b": 80,
+          "brightness": 15
         }
       ]
     },
@@ -63,53 +70,60 @@
           "brightness": 80
         },
         {
-          "offsetMs": 50,
+          "offsetMs": 120,
           "r": 255,
           "g": 255,
           "b": 255,
-          "brightness": 0
+          "brightness": 24
         },
         {
-          "offsetMs": 100,
-          "r": 255,
-          "g": 255,
-          "b": 255,
-          "brightness": 80
-        },
-        {
-          "offsetMs": 150,
-          "r": 255,
-          "g": 255,
-          "b": 255,
-          "brightness": 0
-        },
-        {
-          "offsetMs": 200,
+          "offsetMs": 240,
           "r": 255,
           "g": 255,
           "b": 255,
           "brightness": 80
         },
         {
-          "offsetMs": 250,
+          "offsetMs": 360,
           "r": 255,
           "g": 255,
           "b": 255,
-          "brightness": 0
+          "brightness": 24
         },
         {
-          "offsetMs": 300,
+          "offsetMs": 480,
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "brightness": 80
+        },
+        {
+          "offsetMs": 600,
           "r": 255,
           "g": 180,
           "b": 80,
           "brightness": 32
         },
         {
-          "offsetMs": 350,
+          "offsetMs": 720,
           "r": 255,
           "g": 180,
           "b": 80,
-          "brightness": 0
+          "brightness": 25
+        },
+        {
+          "offsetMs": 840,
+          "r": 255,
+          "g": 180,
+          "b": 80,
+          "brightness": 18
+        },
+        {
+          "offsetMs": 960,
+          "r": 255,
+          "g": 180,
+          "b": 80,
+          "brightness": 12
         }
       ]
     },

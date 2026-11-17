@@ -59,10 +59,10 @@ public class UdpPowerTests
         await driver.SetState(255, 255, 255, 100, 100);
         using var white = JsonDocument.Parse((await socket.ReceiveAsync(timeout.Token)).Buffer);
         var whiteParams = white.RootElement.GetProperty("params");
-        Assert.Equal(64, whiteParams.GetProperty("c").GetInt32());
-        Assert.Equal(64, whiteParams.GetProperty("w").GetInt32());
+        Assert.Equal(255, whiteParams.GetProperty("c").GetInt32());
+        Assert.Equal(255, whiteParams.GetProperty("w").GetInt32());
         Assert.Equal(
-            128,
+            510,
             whiteParams.GetProperty("c").GetInt32() + whiteParams.GetProperty("w").GetInt32());
         Assert.Equal(0, whiteParams.GetProperty("r").GetInt32());
 

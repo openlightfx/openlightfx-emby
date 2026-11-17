@@ -356,10 +356,14 @@ public class PlaybackSession
                 var renderer = _effectFactory.GetRenderer(efx.EffectType);
                 if (renderer == null) continue;
 
+                var scene = InterpolationEngine.SampleChannel(
+                    GetChannelKeyframes(channelId),
+                    efx.TimestampMs + efx.DurationMs);
                 var context = new EffectContext(
                     BulbCapabilities: new BulbCapabilityProfile(true, true, 2000, 6500, 0, 20),
                     GlobalBrightnessCap: (uint)_options.GlobalBrightnessCap,
-                    PhotosensitivityEnabled: _options.PhotosensitivityMode
+                    PhotosensitivityEnabled: _options.PhotosensitivityMode,
+                    Scene: new EffectSceneColor(scene.R, scene.G, scene.B, scene.Brightness)
                 );
 
                 var cmds = renderer.Render(efx, context);
