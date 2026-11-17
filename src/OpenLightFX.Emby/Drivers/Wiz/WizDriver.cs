@@ -42,7 +42,9 @@ public class WizDriver : IBulbDriver
             ColorTempMin: WizColorTempMin,
             ColorTempMax: WizColorTempMax,
             MinTransitionMs: 100,
-            MaxCommandsPerSecond: 5
+            // About ten commands a second keeps a 120 ms flash and stays within
+            // what a WiZ bulb will accept over UDP.
+            MaxCommandsPerSecond: 10
         );
     }
 
@@ -51,7 +53,7 @@ public class WizDriver : IBulbDriver
     public async Task SetState(byte r, byte g, byte b, uint brightness, uint transitionMs)
     {
         var dimming = MapBrightness(brightness);
-        var (outR, outG, outB, coldWhite, warmWhite) = RgbToRgbColdWarmWhite(r, g, b);
+        var (outR, outG, outB, coldWhite, warmWhite) = PilotChannels(r, g, b, brightness);
         // WiZ's minimum dimming is nonzero, and all-zero output can fall back to white.
         var powered = brightness > 0 &&
             (outR != 0 || outG != 0 || outB != 0 || coldWhite != 0 || warmWhite != 0);
@@ -78,7 +80,7 @@ public class WizDriver : IBulbDriver
     {
         var brightness = _lastKnownState?.Brightness ?? 100;
         var dimming = MapBrightness(brightness);
-        var (outR, outG, outB, coldWhite, warmWhite) = RgbToRgbColdWarmWhite(r, g, b);
+        var (outR, outG, outB, coldWhite, warmWhite) = PilotChannels(r, g, b, brightness);
         var powered = brightness > 0 &&
             (outR != 0 || outG != 0 || outB != 0 || coldWhite != 0 || warmWhite != 0);
         var payload = new JsonObject
@@ -105,7 +107,7 @@ public class WizDriver : IBulbDriver
         var dimming = MapBrightness(brightness);
         var state = _lastKnownState;
         byte r = state?.R ?? 255, g = state?.G ?? 255, bVal = state?.B ?? 255;
-        var (outR, outG, outB, coldWhite, warmWhite) = RgbToRgbColdWarmWhite(r, g, bVal);
+        var (outR, outG, outB, coldWhite, warmWhite) = PilotChannels(r, g, bVal, brightness);
         var powered = brightness > 0 &&
             (outR != 0 || outG != 0 || outB != 0 || coldWhite != 0 || warmWhite != 0);
 
@@ -299,6 +301,23 @@ public class WizDriver : IBulbDriver
         {
             return null;
         }
+    }
+
+    // A near-white flash at high brightness drives both white LEDs to full.
+    // The balanced mapping below caps their sum at 128, which makes lightning look dim.
+    private static bool IsNearWhite(byte red, byte green, byte blue)
+    {
+        var max = Math.Max(red, Math.Max(green, blue));
+        var min = Math.Min(red, Math.Min(green, blue));
+        return max >= 240 && max - min <= 20;
+    }
+
+    private static (byte R, byte G, byte B, byte ColdWhite, byte WarmWhite) PilotChannels(
+        byte red, byte green, byte blue, uint brightness)
+    {
+        if (brightness >= 80 && IsNearWhite(red, green, blue))
+            return (0, 0, 0, 255, 255);
+        return RgbToRgbColdWarmWhite(red, green, blue);
     }
 
     // Extract the shared white contribution with pywizlight's RGB→RGBCW mapping,

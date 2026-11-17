@@ -24,7 +24,7 @@ public static class StudioBulbCapabilities
     /// </summary>
     public static BulbCapabilityProfile ForProtocol(BulbProtocol protocol) => protocol switch
     {
-        BulbProtocol.Wiz => new BulbCapabilityProfile(true, true, 2200, 6500, 100, 5),
+        BulbProtocol.Wiz => new BulbCapabilityProfile(true, true, 2200, 6500, 100, 10),
         BulbProtocol.Hue => new BulbCapabilityProfile(true, true, 2000, 6535, 100, 10),
         BulbProtocol.Lifx => new BulbCapabilityProfile(true, true, 1500, 9000, 50, 20),
         BulbProtocol.Govee => new BulbCapabilityProfile(true, true, 2000, 9000, 100, 5),
