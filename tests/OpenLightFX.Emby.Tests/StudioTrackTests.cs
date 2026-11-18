@@ -130,6 +130,34 @@ public class StudioTrackFileTests
     }
 
     [Fact]
+    public void Index_forget_removes_only_the_matching_track_path()
+    {
+        var root = Directory.CreateTempSubdirectory("olfx-index-forget-");
+        try
+        {
+            var path = Path.Combine(root.FullName, "studio-tracks.json");
+            var index = new StudioTrackIndex(path);
+            var deletedTrack = Path.Combine(root.FullName, "deleted.lightfx");
+            var otherTrack = Path.Combine(root.FullName, "other.lightfx");
+            index.Remember("deleted", "movie", deletedTrack);
+            index.Remember("other", "movie", otherTrack);
+
+            index.Forget("deleted", otherTrack);
+            Assert.True(index.TryGet("deleted", out _));
+            index.Forget("deleted", deletedTrack);
+
+            var reloaded = new StudioTrackIndex(path);
+            Assert.False(reloaded.TryGet("deleted", out _));
+            Assert.True(reloaded.TryGet("other", out var retained));
+            Assert.Equal(otherTrack, retained.FilePath);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void Index_round_trips_a_track_id()
     {
         var root = Directory.CreateTempSubdirectory("olfx-index-");

@@ -50,6 +50,19 @@ public sealed class StudioTrackIndex
         }
     }
 
+    public void Forget(string trackId, string filePath)
+    {
+        lock (_gate)
+        {
+            if (_entries.TryGetValue(trackId, out var entry)
+                && string.Equals(entry.FilePath, filePath, StringComparison.OrdinalIgnoreCase))
+            {
+                _entries.Remove(trackId);
+                Save();
+            }
+        }
+    }
+
     public void RememberAll(IEnumerable<StudioListedTrack> tracks)
     {
         lock (_gate)

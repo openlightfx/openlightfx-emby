@@ -147,6 +147,24 @@ public class TrackSelectionService
         }
     }
 
+    /// <summary>Clear every selection that points at a deleted track file.</summary>
+    public void ClearTrackPath(string trackPath)
+    {
+        lock (_gate)
+        {
+            var keys = _selections
+                .Where(entry => string.Equals(entry.Value.TrackPath, trackPath, StringComparison.OrdinalIgnoreCase))
+                .Select(entry => entry.Key)
+                .ToArray();
+            if (keys.Length == 0)
+                return;
+
+            foreach (var key in keys)
+                _selections.Remove(key);
+            Save();
+        }
+    }
+
     /// <summary>Get all track selections.</summary>
     public IReadOnlyDictionary<string, TrackSelection> GetAllSelections()
     {

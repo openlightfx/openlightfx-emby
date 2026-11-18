@@ -104,6 +104,31 @@ public sealed class TrackSelectionServiceTests
         }
     }
 
+    [Fact(DisplayName = "WATCH-001 @unit deleting a track clears global and device selections for that path")]
+    public void Deleting_track_clears_all_matching_saved_selections()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "olfx-selection-delete-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var service = new TrackSelectionService(root);
+            var deletedPath = Path.Combine("movie", "lightfx", "deleted.lightfx");
+            service.SetSelectedTrack("movie-a", deletedPath);
+            service.SetSelectedTrack("movie-a", deletedPath, "screen-a");
+            service.SetSelectedTrack("movie-b", Path.Combine("movie", "other.lightfx"));
+
+            service.ClearTrackPath(deletedPath);
+            var reloaded = new TrackSelectionService(root);
+
+            Assert.Null(reloaded.GetGlobalSelectedTrack("movie-a"));
+            Assert.Null(reloaded.GetDeviceSelectedTrack("movie-a", "screen-a"));
+            Assert.Equal(Path.Combine("movie", "other.lightfx"), reloaded.GetGlobalSelectedTrack("movie-b"));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     private static TrackInfo CreateTrack(string path, bool isValid = true) => new()
     {
         FilePath = path,

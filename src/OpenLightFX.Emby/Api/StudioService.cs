@@ -144,6 +144,14 @@ public class PutStudioTrack : IRequiresRequestStream, IReturn<StudioTrackRespons
     public Stream? RequestStream { get; set; }
 }
 
+[Route("/OpenLightFX/Studio/Tracks/{TrackId}", "DELETE", Description = "Delete a movie's .lightfx track")]
+[Authenticated(Roles = "Admin")]
+public class DeleteStudioTrack
+{
+    public string TrackId { get; set; } = "";
+    public string? ItemId { get; set; }
+}
+
 [Route("/OpenLightFX/Studio/Items/{ItemId}/ActiveTrack", "POST", Description = "Select the active track for every room")]
 [Authenticated(Roles = "Admin")]
 public class PostStudioActiveTrack : IReturn<StudioActiveTrackResponse>
@@ -998,6 +1006,55 @@ public class StudioService : IService, IRequiresRequest
         };
     }
 
+    public object Delete(DeleteStudioTrack request)
+    {
+        if (string.IsNullOrWhiteSpace(request.ItemId))
+            throw new ArgumentException("itemId is required");
+        if (!StudioTrackFiles.IsSafeTrackId(request.TrackId))
+            throw new ArgumentException("trackId contains unsupported characters");
+
+        var item = RequireItem(request.ItemId);
+        if (string.IsNullOrEmpty(item.Path))
+            throw new ResourceNotFoundException("Item has no file path");
+
+        var itemId = PublicItemId(item);
+        var track = Discover(item).FirstOrDefault(candidate =>
+            string.Equals(candidate.TrackId, request.TrackId, StringComparison.Ordinal)
+            && string.Equals(candidate.ItemId, itemId, StringComparison.Ordinal));
+        if (track == null || !File.Exists(track.FilePath))
+            throw new ResourceNotFoundException("Track not found for this movie");
+
+        try
+        {
+            File.Delete(track.FilePath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new ArgumentException($"Could not delete track: {ex.Message}");
+        }
+
+        var sidecarPath = StudioSidecar.GetPath(item.Path, request.TrackId);
+        if (File.Exists(sidecarPath))
+        {
+            try
+            {
+                File.Delete(sidecarPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.Warn("Deleted track '{0}' but could not remove project sidecar '{1}': {2}",
+                    request.TrackId, sidecarPath, ex.Message);
+            }
+        }
+
+        var entry = ServerEntryPoint.Instance;
+        entry?.TrackDiscoveryService.InvalidateCache(item.Path);
+        entry?.StudioTrackIndex.Forget(track.TrackId, track.FilePath);
+        entry?.SelectionService.ClearTrackPath(track.FilePath);
+        _logger.Info("Deleted Studio track '{0}' for item {1} at '{2}'", request.TrackId, itemId, track.FilePath);
+        return new StudioTrackResponse { TrackId = request.TrackId, ItemId = itemId };
+    }
+
     public object Get(GetStudioProject request)
     {
         if (string.IsNullOrWhiteSpace(request.ItemId))
@@ -1227,9 +1284,12 @@ public class StudioService : IService, IRequiresRequest
         var itemId = PublicItemId(item);
         return StudioProxyCache.GetOrAdd(itemId, () =>
         {
-            var directory = Path.Combine(
-                Plugin.Instance?.DataFolderPath ?? Path.GetTempPath(),
-                "studio-proxy");
+            var movieDirectory = string.IsNullOrEmpty(item.Path)
+                ? null
+                : Path.GetDirectoryName(item.Path);
+            var directory = string.IsNullOrEmpty(movieDirectory)
+                ? Path.Combine(Plugin.Instance?.DataFolderPath ?? Path.GetTempPath(), "studio-proxy")
+                : Path.Combine(movieDirectory, "lightfx");
             Directory.CreateDirectory(directory);
             var output = Path.Combine(directory, SafeFileToken(itemId) + ".mp4");
             var (width, height) = OutputSize(source.Width, source.Height);
