@@ -109,7 +109,7 @@ public static class StudioProxyPlan
 {
     public const int MaxLongSide = 1280;
     // Cache markers from older encoders must not revive the AAC-shifted timeline.
-    public const string CacheVersion = "source-timeline-v3-gpu-encode";
+    public const string CacheVersion = "source-timeline-v4-cuda-scale";
 
     public static int GopFrames(double fps)
     {
@@ -128,20 +128,26 @@ public static class StudioProxyPlan
         string outputPath,
         double fps,
         int? videoStreamIndex = null,
-        bool useGpuEncoder = false)
+        bool useGpuEncoder = false,
+        bool useCudaPipeline = false,
+        bool useHardwareDecode = true)
     {
         var gop = GopFrames(fps);
-        var scale =
-            "scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease," +
-            "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+        var scale = useCudaPipeline
+            ? "scale_cuda=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:format=nv12"
+            : "scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease," +
+                "scale=trunc(iw/2)*2:trunc(ih/2)*2";
         // The harness sets OLFX_STUDIO_PROXY_READRATE so a long synthetic clip is still
         // encoding when playback starts. Production encodes as fast as ffmpeg can.
         var args = new List<string> { "-y" };
         if (RealtimeRead())
             args.Add("-re");
-        // Accelerate decoding and (when requested) use NVIDIA NVENC for H.264 encoding.
-        // A software-encode argument set is retained as the runtime fallback.
-        args.AddRange(new[] { "-hwaccel", "auto" });
+        // Keep frames on CUDA through resize and NVENC when supported. Separate
+        // fallback plans retain NVENC with CPU scaling, then all-software transcoding.
+        if (useCudaPipeline)
+            args.AddRange(new[] { "-hwaccel", "cuda", "-hwaccel_output_format", "cuda" });
+        else if (useHardwareDecode)
+            args.AddRange(new[] { "-hwaccel", "auto" });
         args.AddRange(new[]
         {
             "-i", inputPath,
@@ -149,7 +155,11 @@ public static class StudioProxyPlan
             "-map", "0:a:0?",
             "-vf", scale,
             "-c:v", useGpuEncoder ? "h264_nvenc" : "libx264",
-            "-pix_fmt", "yuv420p",
+        });
+        if (!useCudaPipeline)
+            args.AddRange(new[] { "-pix_fmt", "yuv420p" });
+        args.AddRange(new[]
+        {
             "-profile:v", "high",
             "-g", gop.ToString(CultureInfo.InvariantCulture),
             "-keyint_min", gop.ToString(CultureInfo.InvariantCulture),

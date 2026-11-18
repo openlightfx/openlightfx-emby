@@ -63,6 +63,15 @@ public class PluginOptions : EditableOptionsBase
     [Description("Display a warning before playback when a track contains flashing or strobing effects.")]
     public bool ShowFlashingWarnings { get; set; } = true;
 
+    // --- Studio Media Processing ---
+    [DisplayName("Transcode Temporary Directory")]
+    [Description("Optional local or fast-storage directory used while Studio analyzes movies. Studio copies the movie here when creating a track and removes the copy when the editor closes. The Emby service account needs permission to read, create, write, and delete files in this folder. On Linux, for example: sudo chown emby:emby /path/to/folder && sudo chmod 750 /path/to/folder (replace emby with the account running Emby). On Windows, grant the Emby service account Modify permission. Leave blank to process the library file directly.")]
+    public string TranscodeTempDirectory { get; set; } = "";
+
+    [DisplayName("Studio Scene-cut Threshold")]
+    [Description("Global PySceneDetect content threshold used when Studio prepares an edit proxy. Values are 0.01–1.00; 0.27 (threshold 27) is the default. Lower values detect more cuts.")]
+    public double StudioSceneCutThreshold { get; set; } = 0.27;
+
     // --- Track Library ---
     [DisplayName("Additional Track Scan Paths")]
     [Description("Additional directories to search for .lightfx files (one path per line). " +

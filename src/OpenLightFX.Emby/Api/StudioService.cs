@@ -56,6 +56,18 @@ public class GetStudioStreamUrl : IReturn<StudioStreamUrlResponse>
     public string ItemId { get; set; } = "";
 }
 
+[Route("/OpenLightFX/Studio/Items/{ItemId}/SourceWorkspace", "POST", Description = "Copy a movie to the configured Studio transcode directory")]
+[Authenticated(Roles = "Admin")]
+public class PostStudioSourceWorkspace { public string ItemId { get; set; } = ""; }
+
+[Route("/OpenLightFX/Studio/Items/{ItemId}/SourceWorkspace", "GET", Description = "Read Studio source-copy progress")]
+[Authenticated(Roles = "Admin")]
+public class GetStudioSourceWorkspace { public string ItemId { get; set; } = ""; }
+
+[Route("/OpenLightFX/Studio/Items/{ItemId}/SourceWorkspace", "DELETE", Description = "Remove the temporary Studio movie copy")]
+[Authenticated(Roles = "Admin")]
+public class DeleteStudioSourceWorkspace { public string ItemId { get; set; } = ""; }
+
 [Route("/OpenLightFX/Studio/Items/{ItemId}/MediaInfo", "GET", Description = "Movie timing, HDR, and edit-proxy progress")]
 [Authenticated]
 public class GetStudioMediaInfo
@@ -589,6 +601,45 @@ public class StudioService : IService, IRequiresRequest
         }
     }
 
+    public object Post(PostStudioSourceWorkspace request)
+    {
+        var item = RequireItem(request.ItemId);
+        if (string.IsNullOrWhiteSpace(item.Path) || !File.Exists(item.Path))
+            throw new ResourceNotFoundException("Movie file not found");
+        var configured = Plugin.Instance?.GetPluginOptions().TranscodeTempDirectory;
+        if (string.IsNullOrWhiteSpace(configured)) return new StudioSourceWorkspaceResponse { Required = false };
+        var itemId = PublicItemId(item);
+        var workspace = StudioSourceWorkspace.Start(itemId, item.Path, configured, ProxyOutputPath(item, itemId));
+        return SourceWorkspaceResponse(workspace, required: true);
+    }
+
+    public object Get(GetStudioSourceWorkspace request)
+    {
+        var workspace = StudioSourceWorkspace.Find(PublicItemId(RequireItem(request.ItemId)));
+        if (workspace == null) throw new ResourceNotFoundException("Studio source copy was not started");
+        return SourceWorkspaceResponse(workspace, required: true);
+    }
+
+    public object Delete(DeleteStudioSourceWorkspace request)
+    {
+        StudioSourceWorkspace.Release(PublicItemId(RequireItem(request.ItemId)));
+        return new StudioSourceWorkspaceResponse { State = "released" };
+    }
+
+    private static StudioSourceWorkspaceResponse SourceWorkspaceResponse(StudioSourceWorkspace? workspace, bool required)
+    {
+        if (workspace == null) return new StudioSourceWorkspaceResponse { Required = required };
+        var snapshot = workspace.Snapshot();
+        return new StudioSourceWorkspaceResponse
+        {
+            Required = required,
+            State = snapshot.State,
+            Error = snapshot.Error,
+            CopiedBytes = snapshot.Copied,
+            TotalBytes = snapshot.Length
+        };
+    }
+
     public object Get(GetStudioStreamUrl request)
     {
         var item = RequireItem(request.ItemId);
@@ -620,7 +671,14 @@ public class StudioService : IService, IRequiresRequest
     {
         var item = RequireItem(request.ItemId);
         var source = await ProbeAsync(item).ConfigureAwait(false);
-        var job = EnsureProxy(item, source);
+        var itemId = PublicItemId(item);
+        var configuredTemp = Plugin.Instance?.GetPluginOptions().TranscodeTempDirectory;
+        var workspace = StudioSourceWorkspace.Find(itemId);
+        var job = !string.IsNullOrWhiteSpace(configuredTemp) && workspace == null
+            ? StudioProxyJob.Missing(itemId, source.Fps, OutputSize(source.Width, source.Height).Width, OutputSize(source.Width, source.Height).Height)
+            : EnsureProxy(item, source);
+        if (job.State is "building" or "ready")
+            await EnsureSceneCutDetection(item, source).ConfigureAwait(false);
         StudioSessionAuth.Remember(Request, StudioTicketScope.ProxyMedia);
         return ToMediaInfo(item, source, job);
     }
@@ -642,8 +700,7 @@ public class StudioService : IService, IRequiresRequest
         var item = RequireItem(request.ItemId);
         if (string.IsNullOrEmpty(item.Path))
             throw new ArgumentException("Movie has no media file");
-        if (!double.IsFinite(request.SampleRateFps) || !double.IsFinite(request.SceneCutThreshold)
-            || !double.IsFinite(request.CenterExclusionPercent))
+        if (!double.IsFinite(request.SampleRateFps) || !double.IsFinite(request.CenterExclusionPercent))
             throw new ArgumentException("Generation settings must be finite numbers");
         if (request.Zones == null || request.Zones.Count == 0 || request.Zones.Count > 6)
             throw new ArgumentException("Select a sampling zone for each track channel");
@@ -660,11 +717,19 @@ public class StudioService : IService, IRequiresRequest
         var siren = EffectChannels(request.SirenChannels, zoneIds, "Siren");
 
         var source = await ProbeAsync(item).ConfigureAwait(false);
+        var proxy = EnsureProxy(item, source);
+        if (proxy.State != "ready")
+            throw new ConflictException("Wait for the edit proxy to finish processing before pre-filling the track");
+        var sceneCuts = SceneCutStore.Open().TryLoad(PublicItemId(item));
+        if (sceneCuts == null
+            || sceneCuts.Status(SceneCutSource.Capture(item.Path), SceneCutActivity.IsRunning(PublicItemId(item))) != "ready"
+            || Math.Abs(sceneCuts.Detector.Threshold - ConfiguredSceneCutThreshold()) >= 0.0001)
+            throw new ConflictException("Wait for scene detection to finish before pre-filling the track");
         var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
         var zscale = source.Hdr && await HasZscaleAsync(ffmpeg).ConfigureAwait(false);
         var options = new AiTrackGenerationOptions(
             Math.Clamp(request.SampleRateFps, 0.1, 5),
-            ContentDetector.ThresholdFromStudioSetting(request.SceneCutThreshold),
+            ConfiguredSceneCutThreshold(),
             Math.Clamp(request.CenterExclusionPercent, 0, 90),
             request.Zones.Select(zone => new AiTrackZone(zone.ChannelId, zone.X, zone.Y, zone.Width, zone.Height)).ToList(),
             request.Fades,
@@ -673,7 +738,8 @@ public class StudioService : IService, IRequiresRequest
         try
         {
             var job = AiTrackGenerationJobs.Start(
-                PublicItemId(item), item.Path, source.RuntimeMs, options, ffmpeg, source.Hdr, source.ColorTransfer, zscale, source.VideoStreamIndex, source.Width, source.Height);
+                PublicItemId(item), SourcePath(item), source.RuntimeMs, options, ffmpeg, source.Hdr, source.ColorTransfer, zscale, source.VideoStreamIndex, source.Width, source.Height,
+                item.Path);
             return GenerationResponse(job, 0);
         }
         catch (InvalidOperationException ex)
@@ -710,7 +776,7 @@ public class StudioService : IService, IRequiresRequest
         double threshold;
         try
         {
-            threshold = SceneCutApi.ResolveThreshold(request.SceneCutThreshold);
+            threshold = ConfiguredSceneCutThreshold();
         }
         catch (ArgumentOutOfRangeException)
         {
@@ -723,8 +789,9 @@ public class StudioService : IService, IRequiresRequest
         try
         {
             var job = SceneCutDetectionJobs.Start(
-                PublicItemId(item), item.Path, source.RuntimeMs, threshold, ffmpeg,
-                source.Hdr, source.ColorTransfer, zscale, source.VideoStreamIndex, source.Width, source.Height);
+                PublicItemId(item), SourcePath(item), source.RuntimeMs, threshold, ffmpeg,
+                source.Hdr, source.ColorTransfer, zscale, source.VideoStreamIndex, source.Width, source.Height,
+                item.Path);
             return SceneCutApi.Job(job);
         }
         catch (InvalidOperationException ex)
@@ -790,7 +857,7 @@ public class StudioService : IService, IRequiresRequest
         var zscale = source.Hdr && await HasZscaleAsync(ffmpeg).ConfigureAwait(false);
         var (probeCode, packets, _) = await StudioProcess.RunAsync(
             RequireTool(FfprobePath(), "ffprobe"),
-            StudioFramePlan.ProbeArguments(item.Path, timeMs, source.StartSeconds, source.VideoStreamIndex),
+            StudioFramePlan.ProbeArguments(SourcePath(item), timeMs, source.StartSeconds, source.VideoStreamIndex),
             CancellationToken.None).ConfigureAwait(false);
         if (probeCode != 0)
             throw new ServiceUnavailableException("Frame position could not be read");
@@ -803,7 +870,7 @@ public class StudioService : IService, IRequiresRequest
         {
             throw new ServiceUnavailableException("Frame position could not be read");
         }
-        var arguments = StudioFramePlan.Arguments(item.Path, frameTime, source.Hdr, source.ColorTransfer, request.MaxWidth, zscale, source.VideoStreamIndex);
+        var arguments = StudioFramePlan.Arguments(SourcePath(item), frameTime, source.Hdr, source.ColorTransfer, request.MaxWidth, zscale, source.VideoStreamIndex);
         var (code, png, log) = await StudioProcess.RunAsync(ffmpeg, arguments, CancellationToken.None).ConfigureAwait(false);
         if (code != 0 || png.Length < 8 || png[0] != 0x89)
             throw new ServiceUnavailableException("Frame extraction failed");
@@ -1240,6 +1307,11 @@ public class StudioService : IService, IRequiresRequest
         return null;
     }
 
+    private static string SourcePath(BaseItem item) =>
+        string.IsNullOrEmpty(item.Path)
+            ? ""
+            : StudioSourceWorkspace.Find(PublicItemId(item))?.ResolveSource(item.Path) ?? item.Path;
+
     private async Task<StudioSourceInfo> ProbeAsync(BaseItem item)
     {
         var itemRuntime = item.RunTimeTicks is long ticks && ticks > 0
@@ -1264,7 +1336,7 @@ public class StudioService : IService, IRequiresRequest
 
         var (code, stdout, _) = await StudioProcess.RunAsync(
             ffprobe,
-            new[] { "-v", "error", "-print_format", "json", "-show_streams", "-show_format", item.Path },
+            new[] { "-v", "error", "-print_format", "json", "-show_streams", "-show_format", SourcePath(item) },
             CancellationToken.None).ConfigureAwait(false);
         if (code != 0 || stdout.Length == 0)
             return fallback;
@@ -1279,21 +1351,99 @@ public class StudioService : IService, IRequiresRequest
         };
     }
 
+    private static string ProxyOutputPath(BaseItem item, string itemId)
+    {
+        var movieDirectory = string.IsNullOrEmpty(item.Path) ? null : Path.GetDirectoryName(item.Path);
+        var directory = string.IsNullOrEmpty(movieDirectory)
+            ? Path.Combine(Plugin.Instance?.DataFolderPath ?? Path.GetTempPath(), "studio-proxy")
+            : Path.Combine(movieDirectory, "lightfx");
+        return Path.Combine(directory, SafeFileToken(itemId) + ".mp4");
+    }
+
+    private void EnsureProxyIsSaved(string temporaryOutput, string durableOutput, string itemId)
+    {
+        var marker = StudioProxyJob.CompleteMarker(durableOutput);
+        var proxyCopy = durableOutput + ".studio-copying";
+        var markerCopy = marker + ".studio-copying";
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(durableOutput)!);
+            File.Copy(temporaryOutput, proxyCopy, true);
+            File.Move(proxyCopy, durableOutput, true);
+            File.WriteAllText(markerCopy, StudioProxyPlan.CacheVersion);
+            File.Move(markerCopy, marker, true);
+        }
+        catch (Exception ex)
+        {
+            try { if (File.Exists(proxyCopy)) File.Delete(proxyCopy); } catch { }
+            try { if (File.Exists(markerCopy)) File.Delete(markerCopy); } catch { }
+            _logger.Warn("Could not save processed edit proxy to the movie library for {0}: {1}", itemId, ex.Message);
+        }
+    }
+
+    private static double ConfiguredSceneCutThreshold()
+    {
+        var configured = Plugin.Instance?.GetPluginOptions().StudioSceneCutThreshold ?? 0.27;
+        if (!double.IsFinite(configured)) configured = 0.27;
+        return ContentDetector.ThresholdFromStudioSetting(Math.Clamp(configured, 0.01, 1.0));
+    }
+
+    private async Task EnsureSceneCutDetection(BaseItem item, StudioSourceInfo source)
+    {
+        var itemId = PublicItemId(item);
+        var inputPath = SourcePath(item);
+        if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath)
+            || SceneCutActivity.IsRunning(itemId)) return;
+
+        var store = SceneCutStore.Open();
+        var saved = store.TryLoad(itemId);
+        var current = SceneCutSource.Capture(item.Path);
+        var threshold = ConfiguredSceneCutThreshold();
+        if (saved != null && saved.Status(current, false) == "ready"
+            && Math.Abs(saved.Detector.Threshold - threshold) < 0.0001) return;
+
+        try
+        {
+            var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
+            var zscale = source.Hdr && await HasZscaleAsync(ffmpeg).ConfigureAwait(false);
+            SceneCutDetectionJobs.Start(
+                itemId, inputPath, source.RuntimeMs, threshold, ffmpeg,
+                source.Hdr, source.ColorTransfer, zscale, source.VideoStreamIndex, source.Width, source.Height,
+                item.Path);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.Warn("Could not start scene-cut detection for {0}: {1}", itemId, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn("Could not start scene-cut detection for {0}: {1}", itemId, ex.Message);
+        }
+    }
+
     private StudioProxyJob EnsureProxy(BaseItem item, StudioSourceInfo source)
     {
         var itemId = PublicItemId(item);
+        var durableOutput = ProxyOutputPath(item, itemId);
+        var workspace = StudioSourceWorkspace.Find(itemId);
+        var configuredTemp = Plugin.Instance?.GetPluginOptions().TranscodeTempDirectory;
+        if (!string.IsNullOrWhiteSpace(configuredTemp) && workspace?.Snapshot().State != "ready")
+        {
+            var size = OutputSize(source.Width, source.Height);
+            return StudioProxyJob.Missing(itemId, source.Fps, size.Width, size.Height);
+        }
+        var output = workspace?.ProxyPath ?? durableOutput;
+        if (StudioProxyCache.TryGet(itemId, out var cachedJob)
+            && !PathsEqual(cachedJob.OutputPath, output))
+            StudioProxyCache.Forget(itemId, deleteOutput: false);
         return StudioProxyCache.GetOrAdd(itemId, () =>
         {
-            var movieDirectory = string.IsNullOrEmpty(item.Path)
-                ? null
-                : Path.GetDirectoryName(item.Path);
-            var directory = string.IsNullOrEmpty(movieDirectory)
-                ? Path.Combine(Plugin.Instance?.DataFolderPath ?? Path.GetTempPath(), "studio-proxy")
-                : Path.Combine(movieDirectory, "lightfx");
-            Directory.CreateDirectory(directory);
-            var output = Path.Combine(directory, SafeFileToken(itemId) + ".mp4");
+            Directory.CreateDirectory(Path.GetDirectoryName(output)!);
             var (width, height) = OutputSize(source.Width, source.Height);
-            var job = new StudioProxyJob(itemId, output, source.Fps, width, height);
+            var saveProcessedProxy = workspace == null
+                ? null
+                : new Action(() => EnsureProxyIsSaved(output, durableOutput, itemId));
+            var job = new StudioProxyJob(itemId, output, source.Fps, width, height, saveProcessedProxy);
             if (StudioProxyJob.IsComplete(output))
             {
                 job.MarkReady(source.RuntimeMs);
@@ -1311,10 +1461,21 @@ public class StudioService : IService, IRequiresRequest
             try
             {
                 var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
-                job.Start(
-                    ffmpeg,
-                    StudioProxyPlan.Arguments(item.Path, output, source.Fps, source.VideoStreamIndex, useGpuEncoder: true),
-                    StudioProxyPlan.Arguments(item.Path, output, source.Fps, source.VideoStreamIndex));
+                var input = SourcePath(item);
+                var cudaPipeline = StudioProxyPlan.Arguments(
+                    input, output, source.Fps, source.VideoStreamIndex,
+                    useGpuEncoder: true, useCudaPipeline: true);
+                var nvencWithCpuScale = StudioProxyPlan.Arguments(
+                    input, output, source.Fps, source.VideoStreamIndex,
+                    useGpuEncoder: true);
+                var software = StudioProxyPlan.Arguments(
+                    input, output, source.Fps, source.VideoStreamIndex,
+                    useHardwareDecode: false);
+                job.StartWithFallbacks(ffmpeg, cudaPipeline, new IReadOnlyList<string>[]
+                {
+                    nvencWithCpuScale,
+                    software
+                });
             }
             catch (Exception ex)
             {
@@ -1345,7 +1506,7 @@ public class StudioService : IService, IRequiresRequest
         KeyframeIntervalMs = job.KeyframeIntervalMs,
         Width = job.Width,
         Height = job.Height,
-        EditUrl = job.State == "failed" ? null : editUrl,
+        EditUrl = job.State is "failed" or "missing" ? null : editUrl,
         Reason = job.State == "failed" ? job.Reason : null
     };
 

@@ -10,7 +10,7 @@ public sealed record AiTrackZone(string ChannelId, double X, double Y, double Wi
 /// Kept so existing Studio clients still send it. Colour is taken from the detection frames, not at this rate.
 /// </param>
 /// <param name="SceneCutThreshold">
-/// PySceneDetect content score. Studio sends 0.01–1 and the service multiplies by 100, so 0.27 is the upstream default of 27.
+/// PySceneDetect content score from the plugin-wide Studio threshold setting (0.27 maps to 27).
 /// </param>
 /// <param name="Fades">Ramp zone keyframes through detected fades to or from black or white.</param>
 /// <param name="LightningChannels">Track channels that receive a lightning effect. Empty skips lightning.</param>
@@ -25,9 +25,8 @@ public sealed record AiTrackGenerationOptions(
     IReadOnlyList<string>? SirenChannels = null);
 
 /// <summary>
-/// Frame sizes and the ffmpeg graph for keyframe generation. Colour is read from the
-/// cut frames (24 fps, about <see cref="DetectionWidth"/> pixels wide). The 64×36
-/// stream remains available for callers that still build the split graph.
+/// Frame sizes and the ffmpeg graph for keyframe generation. Colour is read from
+/// 24-fps frames and precomputed scene cuts are loaded from the durable scene-cut document.
 /// </summary>
 public static class AiTrackAnalysis
 {
@@ -122,16 +121,18 @@ public sealed class AiTrackGenerationJob
     private readonly List<StudioGeneratedEffect> _effects = new();
     private readonly int _sourceWidth;
     private readonly int _sourceHeight;
+    private readonly string _sourceIdentityPath;
     private string _state = "pending";
     private string _error = "";
     private double _progress;
     private long _throughMs;
 
-    public AiTrackGenerationJob(string id, string itemId, string videoPath, long durationMs, AiTrackGenerationOptions options, int sourceWidth, int sourceHeight)
+    public AiTrackGenerationJob(string id, string itemId, string videoPath, string sourceIdentityPath, long durationMs, AiTrackGenerationOptions options, int sourceWidth, int sourceHeight)
     {
         Id = id;
         ItemId = itemId;
         VideoPath = videoPath;
+        _sourceIdentityPath = sourceIdentityPath;
         DurationMs = durationMs;
         Options = options;
         _sourceWidth = sourceWidth;
@@ -175,18 +176,22 @@ public sealed class AiTrackGenerationJob
         try
         {
             var toneMap = AiTrackAnalysis.ToneMap(hdr, colorTransfer, zscale);
-            var analyzedSource = SceneCutSource.Capture(VideoPath);
+            var sceneDocument = SceneCutStore.Open().TryLoad(ItemId);
+            if (sceneDocument == null
+                || sceneDocument.Status(SceneCutSource.Capture(_sourceIdentityPath), false) != "ready"
+                || Math.Abs(sceneDocument.Detector.Threshold - Options.SceneCutThreshold) >= 0.0001)
+                throw new InvalidOperationException("Scene cuts are not ready for this movie");
+            var storedCuts = sceneDocument.Cuts
+                .Select(seconds => (int)Math.Round(seconds * AiTrackAnalysis.DetectionFps))
+                .ToHashSet();
             var filter = AiTrackAnalysis.CutFilter(videoStreamIndex, detectWidth, detectHeight, toneMap);
             var args = AiTrackAnalysis.DecodeArguments(VideoPath, filter);
             process = new Process { StartInfo = StudioProcess.StartInfo(ffmpegPath, args) };
             if (!process.Start()) throw new InvalidOperationException("ffmpeg failed to start");
             var stderrTask = process.StandardError.ReadToEndAsync();
-            var detector = new ContentDetector(Options.SceneCutThreshold);
             var cutFrame = new byte[detectWidth * detectHeight * 3];
             var colors = new SceneColorAccumulator(Options.Zones, Options.CenterExclusionPercent, detectWidth, detectHeight);
             var prefill = new EffectPrefill();
-            var seenCuts = new HashSet<int>();
-            var detectedCuts = new List<int>();
             var cutIndex = 0;
             var sceneStart = 0;
             var opening = true;
@@ -196,13 +201,11 @@ public sealed class AiTrackGenerationJob
             {
                 colors.Observe(cutIndex, cutFrame);
                 prefill.Observe(cutFrame, detectWidth, detectHeight);
-                foreach (var cut in detector.ProcessFrame(cutFrame, detectWidth, detectHeight))
+                if (storedCuts.Contains(cutIndex) && cutIndex > sceneStart)
                 {
-                    if (!seenCuts.Add(cut) || cut <= sceneStart) continue;
-                    detectedCuts.Add(cut);
-                    EmitScene(colors, prefill, idPrefix, sceneStart, cut, opening);
+                    EmitScene(colors, prefill, idPrefix, sceneStart, cutIndex, opening);
                     opening = false;
-                    sceneStart = cut;
+                    sceneStart = cutIndex;
                 }
 
                 var timeMs = AiTrackAnalysis.FrameTimeMs(cutIndex, AiTrackAnalysis.DetectionFps);
@@ -220,9 +223,8 @@ public sealed class AiTrackGenerationJob
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "ffmpeg could not analyze the movie" : "ffmpeg could not analyze the movie");
             if (cutIndex > sceneStart)
                 EmitScene(colors, prefill, idPrefix, sceneStart, cutIndex, opening);
-            AddPrefillEffects(prefill, detectedCuts, cutIndex, idPrefix);
-            SceneCutStore.Open().Save(SceneCutDocument.Create(
-                ItemId, analyzedSource, Options.SceneCutThreshold, detectWidth, DurationMs / 1000.0, detectedCuts));
+            var cutFrames = storedCuts.Order().ToList();
+            AddPrefillEffects(prefill, cutFrames, cutIndex, idPrefix);
             lock (_gate)
             {
                 _progress = 1;
@@ -472,7 +474,8 @@ public static class AiTrackGenerationJobs
     private static readonly ConcurrentDictionary<string, string> ActiveByItem = new(StringComparer.Ordinal);
 
     public static AiTrackGenerationJob Start(string itemId, string videoPath, long durationMs, AiTrackGenerationOptions options,
-        string ffmpegPath, bool hdr, string? transfer, bool zscale, int videoStreamIndex, int sourceWidth, int sourceHeight)
+        string ffmpegPath, bool hdr, string? transfer, bool zscale, int videoStreamIndex, int sourceWidth, int sourceHeight,
+        string? sourceIdentityPath = null)
     {
         if (ActiveByItem.TryGetValue(itemId, out var previousId)
             && Jobs.TryGetValue(previousId, out var previous)
@@ -480,7 +483,7 @@ public static class AiTrackGenerationJobs
             ActiveByItem.TryRemove(itemId, out _);
 
         var id = Guid.NewGuid().ToString("N");
-        var job = new AiTrackGenerationJob(id, itemId, videoPath, durationMs, options, sourceWidth, sourceHeight);
+        var job = new AiTrackGenerationJob(id, itemId, videoPath, sourceIdentityPath ?? videoPath, durationMs, options, sourceWidth, sourceHeight);
         if (!ActiveByItem.TryAdd(itemId, id))
             throw new InvalidOperationException("Keyframe generation is already running for this movie");
         Jobs[id] = job;

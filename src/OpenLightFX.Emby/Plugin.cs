@@ -19,6 +19,8 @@ public class Plugin : BasePluginSimpleUI<PluginOptions>
     {
         _logger = logManager.GetLogger("OpenLightFX");
         Instance = this;
+        try { StudioSourceWorkspace.PruneAbandoned(GetPluginOptions().TranscodeTempDirectory); }
+        catch (Exception ex) { _logger.Warn("Could not prune old Studio transcode copies: {0}", ex.Message); }
         _logger.Info("OpenLightFX plugin loaded");
     }
 
@@ -60,6 +62,8 @@ public class Plugin : BasePluginSimpleUI<PluginOptions>
 
     protected override void OnOptionsSaved(PluginOptions options)
     {
+        try { StudioSourceWorkspace.PruneAbandoned(options.TranscodeTempDirectory); }
+        catch (Exception ex) { _logger.Warn("Could not prune old Studio transcode copies: {0}", ex.Message); }
         _logger.Info("OpenLightFX configuration saved");
     }
 }

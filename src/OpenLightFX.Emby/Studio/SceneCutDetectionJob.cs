@@ -12,17 +12,19 @@ public sealed class SceneCutDetectionJob
     private readonly object _gate = new();
     private readonly int _sourceWidth;
     private readonly int _sourceHeight;
+    private readonly string _sourceIdentityPath;
     private readonly double _threshold;
     private string _state = "pending";
     private string _error = "";
     private double _progress;
     private long _throughMs;
 
-    public SceneCutDetectionJob(string id, string itemId, string videoPath, long durationMs, double threshold, int sourceWidth, int sourceHeight)
+    public SceneCutDetectionJob(string id, string itemId, string videoPath, string sourceIdentityPath, long durationMs, double threshold, int sourceWidth, int sourceHeight)
     {
         Id = id;
         ItemId = itemId;
         VideoPath = videoPath;
+        _sourceIdentityPath = sourceIdentityPath;
         DurationMs = durationMs;
         _threshold = threshold;
         _sourceWidth = sourceWidth;
@@ -53,7 +55,7 @@ public sealed class SceneCutDetectionJob
     private async Task RunAsync(string ffmpegPath, bool hdr, string? colorTransfer, bool zscale, int videoStreamIndex)
     {
         var (detectWidth, detectHeight) = AiTrackAnalysis.DetectionSize(_sourceWidth, _sourceHeight);
-        var analyzed = SceneCutSource.Capture(VideoPath);
+        var analyzed = SceneCutSource.Capture(_sourceIdentityPath);
         Process? process = null;
         try
         {
@@ -141,7 +143,8 @@ public static class SceneCutDetectionJobs
     private static readonly ConcurrentDictionary<string, string> ActiveByItem = new(StringComparer.Ordinal);
 
     public static SceneCutDetectionJob Start(string itemId, string videoPath, long durationMs, double threshold,
-        string ffmpegPath, bool hdr, string? transfer, bool zscale, int videoStreamIndex, int sourceWidth, int sourceHeight)
+        string ffmpegPath, bool hdr, string? transfer, bool zscale, int videoStreamIndex, int sourceWidth, int sourceHeight,
+        string? sourceIdentityPath = null)
     {
         if (ActiveByItem.TryGetValue(itemId, out var previousId)
             && Jobs.TryGetValue(previousId, out var previous)
@@ -149,7 +152,7 @@ public static class SceneCutDetectionJobs
             ActiveByItem.TryRemove(itemId, out _);
 
         var id = Guid.NewGuid().ToString("N");
-        var job = new SceneCutDetectionJob(id, itemId, videoPath, durationMs, threshold, sourceWidth, sourceHeight);
+        var job = new SceneCutDetectionJob(id, itemId, videoPath, sourceIdentityPath ?? videoPath, durationMs, threshold, sourceWidth, sourceHeight);
         if (!ActiveByItem.TryAdd(itemId, id))
             throw new InvalidOperationException("Scene cut detection is already running for this movie");
         Jobs[id] = job;

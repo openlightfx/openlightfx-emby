@@ -8,8 +8,9 @@ public sealed class StudioProxyJob
     private long _encodedThroughMs;
     private int _state; // 0 building, 1 ready, 2 failed
     private string _reason = "";
+    private readonly Action? _onReady;
 
-    public StudioProxyJob(string itemId, string outputPath, double fps, int width, int height)
+    public StudioProxyJob(string itemId, string outputPath, double fps, int width, int height, Action? onReady = null)
     {
         ItemId = itemId;
         OutputPath = outputPath;
@@ -17,6 +18,7 @@ public sealed class StudioProxyJob
         Width = Even(width);
         Height = Even(height);
         KeyframeIntervalMs = StudioProxyPlan.IntervalMs(Fps);
+        _onReady = onReady;
     }
 
     public string ItemId { get; }
@@ -65,6 +67,7 @@ public sealed class StudioProxyJob
     {
         1 => "ready",
         2 => "failed",
+        3 => "missing",
         _ => "building"
     };
 
@@ -88,6 +91,13 @@ public sealed class StudioProxyJob
         while (Interlocked.CompareExchange(ref _encodedThroughMs, encodedThroughMs, current) != current);
     }
 
+    public static StudioProxyJob Missing(string itemId, double fps, int width, int height)
+    {
+        var job = new StudioProxyJob(itemId, "", fps, width, height);
+        Volatile.Write(ref job._state, 3);
+        return job;
+    }
+
     public void MarkFailed(string? reason = null)
     {
         Volatile.Write(ref _reason, StudioProxyReadPlan.PublicReason(reason));
@@ -98,9 +108,24 @@ public sealed class StudioProxyJob
         string ffmpegPath,
         IReadOnlyList<string> arguments,
         IReadOnlyList<string>? softwareFallbackArguments = null) =>
-        StartAttempt(ffmpegPath, arguments, softwareFallbackArguments);
+        StartWithFallbacks(
+            ffmpegPath,
+            arguments,
+            softwareFallbackArguments == null
+                ? Array.Empty<IReadOnlyList<string>>()
+                : new[] { softwareFallbackArguments });
 
-    private void StartAttempt(string ffmpegPath, IReadOnlyList<string> arguments, IReadOnlyList<string>? fallbackArguments)
+    public void StartWithFallbacks(
+        string ffmpegPath,
+        IReadOnlyList<string> arguments,
+        IReadOnlyList<IReadOnlyList<string>> fallbackArguments) =>
+        StartAttempt(ffmpegPath, arguments, fallbackArguments, 0);
+
+    private void StartAttempt(
+        string ffmpegPath,
+        IReadOnlyList<string> arguments,
+        IReadOnlyList<IReadOnlyList<string>> fallbackArguments,
+        int fallbackIndex)
     {
         var process = new Process
         {
@@ -118,13 +143,13 @@ public sealed class StudioProxyJob
             try { exitCode = process.ExitCode; } catch { }
             process.Dispose();
 
-            if (exitCode != 0 && fallbackArguments != null)
+            if (exitCode != 0 && fallbackIndex < fallbackArguments.Count)
             {
-                // Hardware encoders can be present in FFmpeg but unavailable to the
-                // Emby process (driver/device permissions). Retry in software.
+                // CUDA decode/scale, NVENC with CPU scaling, then software encoding
+                // are attempted in order to accommodate different FFmpeg/driver builds.
                 DiscardPartial(OutputPath);
                 Interlocked.Exchange(ref _encodedThroughMs, 0);
-                StartAttempt(ffmpegPath, fallbackArguments, null);
+                StartAttempt(ffmpegPath, fallbackArguments[fallbackIndex], fallbackArguments, fallbackIndex + 1);
                 return;
             }
 
@@ -133,6 +158,7 @@ public sealed class StudioProxyJob
                 if (exitCode == 0 && File.Exists(OutputPath))
                 {
                     File.WriteAllText(CompleteMarkerPath, StudioProxyPlan.CacheVersion);
+                    _onReady?.Invoke();
                     MarkReady(Math.Max(EncodedThroughMs, 0));
                 }
                 else
@@ -149,11 +175,11 @@ public sealed class StudioProxyJob
             if (!process.Start())
             {
                 process.Dispose();
-                if (fallbackArguments != null)
+                if (fallbackIndex < fallbackArguments.Count)
                 {
                     DiscardPartial(OutputPath);
                     Interlocked.Exchange(ref _encodedThroughMs, 0);
-                    StartAttempt(ffmpegPath, fallbackArguments, null);
+                    StartAttempt(ffmpegPath, fallbackArguments[fallbackIndex], fallbackArguments, fallbackIndex + 1);
                 }
                 else
                     MarkFailed("ffmpeg failed to start");
@@ -166,11 +192,11 @@ public sealed class StudioProxyJob
         catch
         {
             process.Dispose();
-            if (fallbackArguments != null)
+            if (fallbackIndex < fallbackArguments.Count)
             {
                 DiscardPartial(OutputPath);
                 Interlocked.Exchange(ref _encodedThroughMs, 0);
-                StartAttempt(ffmpegPath, fallbackArguments, null);
+                StartAttempt(ffmpegPath, fallbackArguments[fallbackIndex], fallbackArguments, fallbackIndex + 1);
             }
             else
                 MarkFailed("ffmpeg failed to start");
@@ -194,10 +220,11 @@ public static class StudioProxyCache
 
     public static bool TryGet(string itemId, out StudioProxyJob job) => Jobs.TryGetValue(itemId, out job!);
 
-    public static void Forget(string itemId)
+    public static void Forget(string itemId, bool deleteOutput = true)
     {
         if (!Jobs.TryRemove(itemId, out var job))
             return;
+        if (!deleteOutput) return;
         try
         {
             if (File.Exists(job.CompleteMarkerPath))
