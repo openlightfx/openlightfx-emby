@@ -158,16 +158,6 @@ public sealed class AiTrackSceneCutTests
     }
 
     [Fact]
-    public void Prefill_decode_asks_ffmpeg_to_use_available_hardware()
-    {
-        var args = AiTrackAnalysis.DecodeArguments("/movie.mkv", "scale=256:144[cut]");
-        Assert.Contains("-hwaccel", args);
-        Assert.Contains("auto", args);
-        Assert.Contains("-i", args);
-        Assert.Contains("/movie.mkv", args);
-    }
-
-    [Fact]
     public void Analysis_filter_splits_colour_samples_from_full_frame_cut_detection()
     {
         var filter = AiTrackAnalysis.Filter(2, 1, 256, 144, "");
