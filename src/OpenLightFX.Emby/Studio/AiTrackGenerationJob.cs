@@ -91,6 +91,12 @@ public static class AiTrackAnalysis
     public static string CutFilter(int videoStreamIndex, int detectWidth, int detectHeight, string toneMap) =>
         $"[0:{videoStreamIndex.ToString(CultureInfo.InvariantCulture)}]{CutBranch(detectWidth, detectHeight, toneMap)}[cut]";
 
+    public static IReadOnlyList<string> DecodeArguments(string videoPath, string filter) => new[]
+    {
+        "-hide_banner", "-loglevel", "error", "-hwaccel", "auto", "-i", videoPath,
+        "-filter_complex", filter, "-map", "[cut]", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"
+    };
+
     public static StudioGeneratedKeyframe Keyframe(string id, string channelId, long timeMs, (byte R, byte G, byte B) color, bool sceneCut) =>
         new()
         {
@@ -171,12 +177,7 @@ public sealed class AiTrackGenerationJob
             var toneMap = AiTrackAnalysis.ToneMap(hdr, colorTransfer, zscale);
             var analyzedSource = SceneCutSource.Capture(VideoPath);
             var filter = AiTrackAnalysis.CutFilter(videoStreamIndex, detectWidth, detectHeight, toneMap);
-            var args = new[]
-            {
-                "-hide_banner", "-loglevel", "error", "-i", VideoPath,
-                "-filter_complex", filter,
-                "-map", "[cut]", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"
-            };
+            var args = AiTrackAnalysis.DecodeArguments(VideoPath, filter);
             process = new Process { StartInfo = StudioProcess.StartInfo(ffmpegPath, args) };
             if (!process.Start()) throw new InvalidOperationException("ffmpeg failed to start");
             var stderrTask = process.StandardError.ReadToEndAsync();
