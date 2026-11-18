@@ -142,7 +142,9 @@ public class EditMediaTests
         Assert.Equal(2, source.StartSeconds);
         Assert.Equal("h264", source.VideoCodec);
         Assert.Contains("-map 0:2", string.Join(" ", StudioProxyPlan.Arguments("/in.mkv", "/out.mp4", source.Fps, source.VideoStreamIndex)));
-        Assert.Contains("-map 0:2", string.Join(" ", StudioFramePlan.Arguments("/in.mkv", 1958, false, "", null, true, source.VideoStreamIndex)));
+        var frameArgs = string.Join(" ", StudioFramePlan.Arguments("/in.mkv", 1958, false, "", null, true, source.VideoStreamIndex));
+        Assert.Contains("-map 0:2", frameArgs);
+        Assert.DoesNotContain("-hwaccel", frameArgs, StringComparison.Ordinal);
     }
 
     [Theory(DisplayName = "PLUG-003 @fixture the proxy is H.264 with a keyframe at least every 500 ms")]
@@ -156,6 +158,7 @@ public class EditMediaTests
         Assert.InRange(interval, 1, 500);
 
         var args = string.Join(" ", StudioProxyPlan.Arguments("/in.mkv", "/out.mp4", fps));
+        Assert.Contains("-hwaccel auto -i /in.mkv", args);
         Assert.Contains("-c:v libx264", args);
         Assert.Contains("-pix_fmt yuv420p", args);
         Assert.Contains("-c:a aac", args);

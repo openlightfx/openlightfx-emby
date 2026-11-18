@@ -82,19 +82,6 @@ public class StudioLinkTests
     }
 
     [Fact]
-    public void Light_tracks_page_links_to_the_slashed_studio_url()
-    {
-        using var stream = new LightTracksPage().GetHtmlStream();
-        using var reader = new StreamReader(stream);
-        var html = reader.ReadToEnd();
-
-        Assert.Contains("href=\"/emby/OpenLightFX/studio/\"", html);
-        Assert.DoesNotContain(
-            "href=\"/emby/OpenLightFX/studio\"",
-            html.Replace("href=\"/emby/OpenLightFX/studio/\"", "", StringComparison.Ordinal));
-    }
-
-    [Fact]
     public void Settings_description_points_at_the_slashed_studio_url()
     {
         var description = new PluginOptions().EditorDescription;

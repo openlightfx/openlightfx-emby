@@ -134,6 +134,9 @@ public static class StudioProxyPlan
         var args = new List<string> { "-y" };
         if (RealtimeRead())
             args.Add("-re");
+        // Accelerate source decoding when FFmpeg can use a server GPU. Keep the
+        // H.264 encoder below on libx264; hardware encoding is not required here.
+        args.AddRange(new[] { "-hwaccel", "auto" });
         args.AddRange(new[]
         {
             "-i", inputPath,
