@@ -9,6 +9,60 @@ using Xunit;
 
 namespace OpenLightFX.Emby.Tests;
 
+public class StudioSourceWorkspaceTests
+{
+    [Fact]
+    public async Task Configured_directory_receives_source_copy_and_release_deletes_it()
+    {
+        var root = Directory.CreateTempSubdirectory("olfx-source-workspace-");
+        var itemId = Guid.NewGuid().ToString("N");
+        try
+        {
+            var source = Path.Combine(root.FullName, "movie.mkv");
+            var content = new byte[4 * 1024 * 1024];
+            Random.Shared.NextBytes(content);
+            await File.WriteAllBytesAsync(source, content);
+            var workspace = StudioSourceWorkspace.Start(itemId, source, root.FullName, durableProxyPath: null)!;
+            Assert.NotNull(workspace);
+            for (var attempt = 0; attempt < 100 && workspace.Snapshot().State == "copying"; attempt++)
+                await Task.Delay(20);
+            Assert.Equal("ready", workspace.Snapshot().State);
+            Assert.Equal(content, await File.ReadAllBytesAsync(workspace.TargetPath));
+            StudioSourceWorkspace.Release(itemId);
+            Assert.False(File.Exists(workspace.TargetPath));
+        }
+        finally
+        {
+            StudioSourceWorkspace.Release(itemId);
+            root.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Startup_pruning_removes_only_workspace_files_older_than_48_hours()
+    {
+        var root = Directory.CreateTempSubdirectory("olfx-source-prune-");
+        try
+        {
+            var workspace = Path.Combine(root.FullName, "OpenLightFXStudio");
+            Directory.CreateDirectory(workspace);
+            var expired = Path.Combine(workspace, "expired.mkv");
+            var current = Path.Combine(workspace, "current.mkv");
+            File.WriteAllText(expired, "old");
+            File.WriteAllText(current, "new");
+            var now = DateTime.UtcNow;
+            File.SetLastWriteTimeUtc(expired, now.AddHours(-49));
+            File.SetLastWriteTimeUtc(current, now.AddHours(-47));
+
+            StudioSourceWorkspace.PruneAbandoned(root.FullName, now);
+
+            Assert.False(File.Exists(expired));
+            Assert.True(File.Exists(current));
+        }
+        finally { root.Delete(recursive: true); }
+    }
+}
+
 public class StudioBulbCapabilityTests
 {
     [Fact]

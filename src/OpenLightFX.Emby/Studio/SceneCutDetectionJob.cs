@@ -14,6 +14,8 @@ public sealed class SceneCutDetectionJob
     private readonly int _sourceHeight;
     private readonly string _sourceIdentityPath;
     private readonly double _threshold;
+    private readonly List<int> _cuts = new();
+    private string _cutsUpdatedAt = DateTimeOffset.UtcNow.ToString("o");
     private string _state = "pending";
     private string _error = "";
     private double _progress;
@@ -36,9 +38,22 @@ public sealed class SceneCutDetectionJob
     private string VideoPath { get; }
     private long DurationMs { get; }
 
-    public (string State, string Error, double Progress, long ThroughMs) Snapshot()
+    public (string State, string Error, double Progress, long ThroughMs, IReadOnlyList<int> Cuts) Snapshot()
     {
-        lock (_gate) return (_state, _error, _progress, _throughMs);
+        lock (_gate) return (_state, _error, _progress, _throughMs, _cuts.ToArray());
+    }
+
+    public SceneCutDocument PartialDocument()
+    {
+        var (width, _) = AiTrackAnalysis.DetectionSize(_sourceWidth, _sourceHeight);
+        lock (_gate)
+        {
+            var document = SceneCutDocument.Create(
+                ItemId, SceneCutSource.Capture(_sourceIdentityPath), _threshold,
+                width, DurationMs / 1000.0, _cuts);
+            document.UpdatedAt = _cutsUpdatedAt;
+            return document;
+        }
     }
 
     public void Start(string ffmpegPath, bool hdr, string? colorTransfer, bool zscale, int videoStreamIndex)
@@ -72,7 +87,6 @@ public sealed class SceneCutDetectionJob
             var stderrTask = process.StandardError.ReadToEndAsync();
             var detector = new ContentDetector(_threshold);
             var frame = new byte[detectWidth * detectHeight * 3];
-            var cuts = new List<int>();
             var seen = new HashSet<int>();
             var index = 0;
             while (await ReadFrameAsync(process.StandardOutput.BaseStream, frame).ConfigureAwait(false))
@@ -80,7 +94,13 @@ public sealed class SceneCutDetectionJob
                 foreach (var cut in detector.ProcessFrame(frame, detectWidth, detectHeight))
                 {
                     if (seen.Add(cut))
-                        cuts.Add(cut);
+                    {
+                        lock (_gate)
+                        {
+                            _cuts.Add(cut);
+                            _cutsUpdatedAt = DateTimeOffset.UtcNow.ToString("o");
+                        }
+                    }
                 }
 
                 var timeMs = AiTrackAnalysis.FrameTimeMs(index, AiTrackAnalysis.DetectionFps);
@@ -97,7 +117,7 @@ public sealed class SceneCutDetectionJob
             if (process.ExitCode != 0)
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "ffmpeg could not analyze the movie" : "ffmpeg could not analyze the movie");
             SceneCutStore.Open().Save(SceneCutDocument.Create(
-                ItemId, analyzed, _threshold, detectWidth, DurationMs / 1000.0, cuts));
+                ItemId, analyzed, _threshold, detectWidth, DurationMs / 1000.0, Snapshot().Cuts));
             lock (_gate)
             {
                 _progress = 1;
@@ -161,4 +181,13 @@ public static class SceneCutDetectionJobs
     }
 
     public static SceneCutDetectionJob? Find(string jobId) => Jobs.TryGetValue(jobId, out var job) ? job : null;
+
+    public static SceneCutDetectionJob? FindRunning(string itemId)
+    {
+        if (!ActiveByItem.TryGetValue(itemId, out var jobId)
+            || !Jobs.TryGetValue(jobId, out var job)
+            || job.Snapshot().State != "processing")
+            return null;
+        return job;
+    }
 }

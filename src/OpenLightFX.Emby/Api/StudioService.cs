@@ -762,10 +762,12 @@ public class StudioService : IService, IRequiresRequest
         var itemId = PublicItemId(item);
         var saved = SceneCutStore.Open().TryLoad(itemId);
         var current = string.IsNullOrEmpty(item.Path) ? null : SceneCutSource.Capture(item.Path);
+        var detection = SceneCutDetectionJobs.FindRunning(itemId);
+        if (detection != null) saved = detection.PartialDocument();
         var liveSeconds = item.RunTimeTicks is long ticks && ticks > 0
             ? ticks / (double)TimeSpan.TicksPerSecond
             : 0;
-        return SceneCutApi.Response(itemId, saved, current, SceneCutActivity.IsRunning(itemId), liveSeconds);
+        return SceneCutApi.Response(itemId, saved, current, detection != null, liveSeconds);
     }
 
     public async Task<object> Post(PostStudioSceneCuts request)
