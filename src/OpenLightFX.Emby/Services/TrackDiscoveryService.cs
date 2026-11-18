@@ -2,6 +2,7 @@ namespace OpenLightFX.Emby.Services;
 
 using MediaBrowser.Model.Logging;
 using OpenLightFX.Emby.Models;
+using OpenLightFX.Emby.Studio;
 
 public class TrackDiscoveryService
 {
@@ -28,15 +29,20 @@ public class TrackDiscoveryService
 
     /// <summary>
     /// Discover all .lightfx tracks for a movie given its file path and optional IMDB ID.
-    /// Uses three strategies in priority order per Track Format Specification §5.2:
-    /// sidecar file, lightfx/ subfolder, then IMDB match across additional scan paths.
+    /// Searches legacy movie sidecars/subfolders and configured IMDB scan paths, then
+    /// the plugin-owned store for the movie's stable identity.
     /// </summary>
     /// <param name="movieFilePath">Full path to the movie file.</param>
     /// <param name="imdbId">Optional IMDB ID (e.g. tt1234567) for metadata matching.</param>
-    /// <param name="additionalScanPaths">User-configured library paths for centralized .lightfx storage.</param>
-    public List<TrackInfo> DiscoverTracks(string movieFilePath, string? imdbId, IEnumerable<string>? additionalScanPaths = null)
+    /// <param name="additionalScanPaths">User-configured paths for centralized .lightfx storage.</param>
+    /// <param name="studioStorageRoot">The configured plugin-owned storage root, if available.</param>
+    public List<TrackInfo> DiscoverTracks(
+        string movieFilePath,
+        string? imdbId,
+        IEnumerable<string>? additionalScanPaths = null,
+        string? studioStorageRoot = null)
     {
-        var cacheKey = movieFilePath + "|" + (imdbId ?? "");
+        var cacheKey = movieFilePath + "|" + (imdbId ?? "") + "|" + (studioStorageRoot ?? "");
         if (_cache.TryGetValue(cacheKey, out var cached))
         {
             var ttl = cached.Tracks.Count > 0 ? PositiveCacheTtl : EmptyCacheTtl;
@@ -115,6 +121,35 @@ public class TrackDiscoveryService
                         seenPaths.Add(file);
                         tracks.Add(info);
                     }
+                }
+            }
+        }
+
+        // The plugin-owned store is keyed by a stable movie identity (IMDb ID where
+        // available, otherwise the source path), not Emby's mutable numeric item ID.
+        // Its copy takes precedence over a legacy in-library copy with the same filename.
+        if (!string.IsNullOrWhiteSpace(studioStorageRoot))
+        {
+            var storedDirectory = StudioTrackStorage.MovieDirectory(studioStorageRoot, movieFilePath, imdbId);
+            if (Directory.Exists(storedDirectory))
+            {
+                foreach (var file in Directory.EnumerateFiles(storedDirectory, "*.lightfx"))
+                {
+                    if (seenPaths.Contains(file)) continue;
+                    var info = _parser.Parse(file);
+                    if (!info.IsValid)
+                    {
+                        filesRejected++;
+                        _logger.Warn("Discovery: '{0}' failed validation: {1}",
+                            Path.GetFileName(file), string.Join("; ", info.ValidationErrors));
+                        continue;
+                    }
+
+                    var stem = Path.GetFileNameWithoutExtension(file);
+                    tracks.RemoveAll(track => string.Equals(
+                        Path.GetFileNameWithoutExtension(track.FileName), stem, StringComparison.OrdinalIgnoreCase));
+                    seenPaths.Add(file);
+                    tracks.Add(info);
                 }
             }
         }

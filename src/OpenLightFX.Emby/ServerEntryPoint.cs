@@ -304,8 +304,9 @@ public class ServerEntryPoint : IServerEntryPoint
 
             var options = GetOptions();
             var scanPaths = _configService.GetScanPaths(options.AdditionalScanPaths);
+            var storageRoot = StudioTrackStorage.ResolveRoot(options.LightfxStoragePath, Plugin.Instance?.DataFolderPath);
 
-            var tracks = _trackDiscoveryService.DiscoverTracks(moviePath, imdbId, scanPaths);
+            var tracks = _trackDiscoveryService.DiscoverTracks(moviePath, imdbId, scanPaths, storageRoot);
             if (tracks.Count == 0)
             {
                 _logger.Debug("No .lightfx tracks found for '{0}' at '{1}'", item.Name, moviePath);

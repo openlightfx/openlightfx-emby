@@ -147,6 +147,23 @@ public class TrackSelectionService
         }
     }
 
+    /// <summary>Update selections when a legacy in-library track is saved into plugin storage.</summary>
+    public void ReplaceTrackPath(string oldTrackPath, string newTrackPath)
+    {
+        lock (_gate)
+        {
+            var matches = _selections.Values
+                .Where(selection => string.Equals(
+                    selection.TrackPath, oldTrackPath, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (matches.Count == 0) return;
+
+            foreach (var selection in matches)
+                selection.TrackPath = newTrackPath;
+            Save();
+        }
+    }
+
     /// <summary>Clear every selection that points at a deleted track file.</summary>
     public void ClearTrackPath(string trackPath)
     {

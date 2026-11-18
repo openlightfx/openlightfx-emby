@@ -53,7 +53,7 @@ Pasted bulb JSON, mapping profiles, active profile names, and device-profile ove
 ```
 Emby playback events (ISessionManager)
   → ServerEntryPoint.TryStartLightingSession(session, item, deviceId)
-      → TrackDiscoveryService (sidecar / lightfx/ subfolder / IMDb in scan paths)
+      → TrackDiscoveryService (plugin-owned store, legacy sidecar/subfolder, IMDb in configured scan paths)
       → TrackSelectionService (active track per item, optionally scoped to device)
       → RoomStore: deviceId → room → bulbs; transient position routing → playback
       → PlaybackSession (state machine, keyframes, effects lookahead, seek detection)
@@ -74,7 +74,7 @@ Key facts:
 - **JSON** on Studio routes is camelCase through `[DataContract]`/`[DataMember(Name = …)]`, which is what Emby's serializer honours on Studio responses. Older routes in `DiscoveryService`/`TrackService` use `[JsonPropertyName]`; use the `DataMember` pattern for new routes and check the actual JSON in a full-stack test.
 - **Auth.** Studio's static SPA shell/assets are public and contain no user data. The SPA gets the signed-in Emby Web credential from same-origin storage and exchanges it through `GET /OpenLightFX/Studio/Session`; the plugin validates an Emby token or redeems a scoped HttpOnly page ticket and returns the token with `Cache-Control: no-store` for in-memory use. Protected Studio routes still require `[Authenticated]`; writes and bulb control require `[Authenticated(Roles = "Admin")]`. Edit-proxy media uses a separate opaque, expiring cookie ticket. Tokens are not put in URLs.
 - **Edit proxy.** `StudioProxyJob` encodes H.264 fragmented MP4 (GOP ≤ 500 ms) with Emby's ffmpeg; `StudioGrowingStream` serves it with HTTP Range while it grows; MediaInfo reports `missing | building (encodedThroughMs) | ready | failed (reason)`. Emby's ffmpeg has no zscale; the Frame endpoint tonemaps with `tonemap=hable` and falls back to Emby's tonemap filter. Uses ffprobe.
-- **Saving.** `PUT /OpenLightFX/Studio/Tracks/{trackId}` validates with `TrackParser` (V- codes) and writes `{movieDir}/lightfx/{trackId}.lightfx`; `If-Match` = `updatedAt`, 409 only when the file exists and differs. Sidecar `{trackId}.studio.json` next to it.
+- **Saving.** `PUT /OpenLightFX/Studio/Tracks/{trackId}` validates with `TrackParser` (V- codes) and writes under the configurable LightFX storage root (`{DataFolderPath}/OpenLightFX` by default), keyed by IMDb ID or a source-path hash rather than Emby's mutable numeric ID. Project sidecars are stored beside tracks; edit proxies use the same root. Keep the root outside media libraries. `If-Match` = `updatedAt`, 409 only when the file exists and differs. Legacy in-library tracks remain discoverable.
 - **Preview** (`StudioPreviewHost`) shares drivers with playback and is mutually exclusive with it: start returns 409 `playback_active` unless `takeover`. Stop restores bulb state.
 - **Proto.** `src/OpenLightFX.Emby/Proto/lightfx.proto` must stay byte-identical to Studio's `proto/lightfx.proto`. Changes must be coordinated with the Studio implementation.
 

@@ -29,9 +29,7 @@ public static class StudioTrackFiles
         return true;
     }
 
-    /// <summary>
-    /// Destination discovery already scans: {movieDir}/lightfx/{trackId}.lightfx.
-    /// </summary>
+    /// <summary>Finds the legacy in-library destination used before plugin-owned storage.</summary>
     public static string GetSavePath(string movieFilePath, string trackId)
     {
         if (!IsSafeTrackId(trackId))

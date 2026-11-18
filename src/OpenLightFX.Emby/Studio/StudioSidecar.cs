@@ -22,7 +22,15 @@ public static class StudioSidecar
     public static string GetPath(string movieFilePath, string trackId)
     {
         var track = StudioTrackFiles.GetSavePath(movieFilePath, trackId);
-        return Path.Combine(Path.GetDirectoryName(track)!, trackId + ".studio.json");
+        return GetPathForTrackFile(track, trackId);
+    }
+
+    public static string GetPathForTrackFile(string trackFilePath, string trackId)
+    {
+        var directory = Path.GetDirectoryName(Path.GetFullPath(trackFilePath));
+        if (string.IsNullOrEmpty(directory))
+            throw new ArgumentException("Track file path is not available", nameof(trackFilePath));
+        return Path.Combine(directory, trackId + ".studio.json");
     }
 
     /// <summary>

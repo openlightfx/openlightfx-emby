@@ -11,8 +11,9 @@ public sealed class StudioSourceWorkspace
     private string _error = "";
     private long _copied;
     private readonly long _length;
+    private readonly bool _proxyOnly;
 
-    private StudioSourceWorkspace(string itemId, string sourcePath, string directory, string? cachedProxyPath)
+    private StudioSourceWorkspace(string itemId, string sourcePath, string directory, string? cachedProxyPath, bool proxyOnly)
     {
         ItemId = itemId;
         SourcePath = sourcePath;
@@ -20,7 +21,10 @@ public sealed class StudioSourceWorkspace
         TargetPath = Path.Combine(directory, "source" + Path.GetExtension(sourcePath));
         ProxyPath = Path.Combine(directory, "edit-proxy.mp4");
         CachedProxyPath = cachedProxyPath;
-        _length = new FileInfo(sourcePath).Length + (cachedProxyPath == null ? 0 : new FileInfo(cachedProxyPath).Length);
+        _proxyOnly = proxyOnly;
+        _length = proxyOnly && cachedProxyPath != null
+            ? new FileInfo(cachedProxyPath).Length
+            : new FileInfo(sourcePath).Length + (cachedProxyPath == null ? 0 : new FileInfo(cachedProxyPath).Length);
     }
 
     public string ItemId { get; }
@@ -28,6 +32,7 @@ public sealed class StudioSourceWorkspace
     public string DirectoryPath { get; }
     public string TargetPath { get; }
     public string ProxyPath { get; }
+    public bool ProxyOnly => _proxyOnly;
     private string? CachedProxyPath { get; }
 
     public static StudioSourceWorkspace? Find(string itemId) =>
@@ -53,7 +58,7 @@ public sealed class StudioSourceWorkspace
         }
     }
 
-    public static StudioSourceWorkspace? Start(string itemId, string sourcePath, string? tempDirectory, string? durableProxyPath)
+    public static StudioSourceWorkspace? Start(string itemId, string sourcePath, string? tempDirectory, string? durableProxyPath, bool proxyOnly = false)
     {
         if (string.IsNullOrWhiteSpace(tempDirectory)) return null;
         if (Workspaces.TryGetValue(itemId, out var existing))
@@ -70,7 +75,8 @@ public sealed class StudioSourceWorkspace
         var cachedProxy = durableProxyPath != null && StudioProxyJob.IsComplete(durableProxyPath)
             ? durableProxyPath
             : null;
-        var created = new StudioSourceWorkspace(itemId, sourcePath, workspaceDirectory, cachedProxy);
+        proxyOnly = proxyOnly && cachedProxy != null;
+        var created = new StudioSourceWorkspace(itemId, sourcePath, workspaceDirectory, cachedProxy, proxyOnly);
         if (!Workspaces.TryAdd(itemId, created))
         {
             try { Directory.Delete(workspaceDirectory, true); } catch { }
@@ -85,7 +91,8 @@ public sealed class StudioSourceWorkspace
         lock (_gate) return (_state, _error, _copied, _length);
     }
 
-    public string ResolveSource(string fallback) => Snapshot().State == "ready" ? TargetPath : fallback;
+    public string ResolveSource(string fallback) =>
+        Snapshot().State == "ready" && !_proxyOnly ? TargetPath : fallback;
 
     public static void Release(string itemId)
     {
@@ -127,6 +134,22 @@ public sealed class StudioSourceWorkspace
     {
         try
         {
+            if (_proxyOnly && CachedProxyPath != null)
+            {
+                await CopyFileAsync(CachedProxyPath, ProxyPath + ".copying", () =>
+                {
+                    lock (_gate)
+                    {
+                        _cancellation.Token.ThrowIfCancellationRequested();
+                        File.Move(ProxyPath + ".copying", ProxyPath, true);
+                        File.WriteAllText(StudioProxyJob.CompleteMarker(ProxyPath), StudioProxyPlan.CacheVersion);
+                        _copied = _length;
+                        _state = "ready";
+                    }
+                    return Task.CompletedTask;
+                }).ConfigureAwait(false);
+                return;
+            }
             await CopyFileAsync(SourcePath, TargetPath + ".copying", async () =>
             {
                 lock (_gate)

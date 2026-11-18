@@ -7,6 +7,7 @@ using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Services;
 using OpenLightFX.Emby.Configuration;
 using OpenLightFX.Emby.Services;
+using OpenLightFX.Emby.Studio;
 
 // ─── Request DTOs ──────────────────────────────────────────────────────
 
@@ -171,7 +172,8 @@ public class TrackService : IService
                 ? _configService.GetScanPaths(options.AdditionalScanPaths)
                 : Enumerable.Empty<string>();
 
-            var tracks = _discoveryService.DiscoverTracks(item.Path, imdbId, scanPaths);
+            var storageRoot = StudioTrackStorage.ResolveRoot(options?.LightfxStoragePath, Plugin.Instance?.DataFolderPath);
+            var tracks = _discoveryService.DiscoverTracks(item.Path, imdbId, scanPaths, storageRoot);
 
             var selectionService = ServerEntryPoint.Instance?.SelectionService ?? _selectionService;
             var globalSelected = selectionService.GetGlobalSelectedTrack(request.ItemId);

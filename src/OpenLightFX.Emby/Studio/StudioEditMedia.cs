@@ -14,7 +14,10 @@ public sealed record StudioSourceInfo(
     string ColorTransfer,
     double Fps,
     double StartSeconds = 0,
-    int VideoStreamIndex = 0);
+    int VideoStreamIndex = 0,
+    IReadOnlyList<StudioChapterInfo>? Chapters = null);
+
+public sealed record StudioChapterInfo(long TimeMs, string Title);
 
 public static class StudioFfprobe
 {
@@ -71,8 +74,25 @@ public static class StudioFfprobe
             }
         }
 
+        var chapters = new List<StudioChapterInfo>();
+        if (root.TryGetProperty("chapters", out var chapterArray) && chapterArray.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var chapter in chapterArray.EnumerateArray())
+            {
+                if (!chapter.TryGetProperty("start_time", out var chapterStart)
+                    || !double.TryParse(chapterStart.GetString() ?? chapterStart.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var chapterSeconds)
+                    || !double.IsFinite(chapterSeconds) || chapterSeconds < 0)
+                    continue;
+                var title = chapter.TryGetProperty("tags", out var tags)
+                    && tags.TryGetProperty("title", out var chapterTitle)
+                    ? chapterTitle.GetString() ?? ""
+                    : "";
+                chapters.Add(new StudioChapterInfo((long)Math.Round(chapterSeconds * 1000.0), title));
+            }
+        }
+
         var runtime = itemRuntimeMs > 0 ? itemRuntimeMs : probedMs;
-        return new StudioSourceInfo(runtime, width, height, video, audio, IsHdr(transfer), transfer, fps <= 0 ? 24 : fps, startSeconds, videoIndex);
+        return new StudioSourceInfo(runtime, width, height, video, audio, IsHdr(transfer), transfer, fps <= 0 ? 24 : fps, startSeconds, videoIndex, chapters);
     }
 
     public static bool IsHdr(string? colorTransfer)

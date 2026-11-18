@@ -360,6 +360,9 @@ public class StudioMediaInfoResponse
     [DataMember(Name = "runtimeMs")]
     public long RuntimeMs { get; set; }
 
+    [DataMember(Name = "chapters")]
+    public List<StudioChapterResponse> Chapters { get; set; } = new();
+
     [DataMember(Name = "width")]
     public int Width { get; set; }
 
@@ -380,6 +383,16 @@ public class StudioMediaInfoResponse
 
     [DataMember(Name = "proxy")]
     public StudioProxyStatusResponse Proxy { get; set; } = new();
+}
+
+[DataContract]
+public class StudioChapterResponse
+{
+    [DataMember(Name = "timeMs")]
+    public long TimeMs { get; set; }
+
+    [DataMember(Name = "title")]
+    public string Title { get; set; } = "";
 }
 
 [DataContract]
@@ -609,7 +622,12 @@ public class StudioService : IService, IRequiresRequest
         var configured = Plugin.Instance?.GetPluginOptions().TranscodeTempDirectory;
         if (string.IsNullOrWhiteSpace(configured)) return new StudioSourceWorkspaceResponse { Required = false };
         var itemId = PublicItemId(item);
-        var workspace = StudioSourceWorkspace.Start(itemId, item.Path, configured, ProxyOutputPath(item, itemId));
+        var cuts = SceneCutStore.Open().TryLoad(itemId);
+        var cutsReady = cuts != null
+            && cuts.Status(SceneCutSource.Capture(item.Path), SceneCutActivity.IsRunning(itemId)) == "ready"
+            && Math.Abs(cuts.Detector.Threshold - ConfiguredSceneCutThreshold()) < 0.0001;
+        var workspace = StudioSourceWorkspace.Start(
+            itemId, item.Path, configured, ProxyOutputPath(item), proxyOnly: cutsReady);
         return SourceWorkspaceResponse(workspace, required: true);
     }
 
@@ -737,9 +755,13 @@ public class StudioService : IService, IRequiresRequest
             siren);
         try
         {
+            var workspace = StudioSourceWorkspace.Find(PublicItemId(item));
+            var useProxyAnalysis = workspace?.ProxyOnly == true;
+            var analysisPath = useProxyAnalysis ? workspace!.ProxyPath : SourcePath(item);
             var job = AiTrackGenerationJobs.Start(
-                PublicItemId(item), SourcePath(item), source.RuntimeMs, options, ffmpeg, source.Hdr, source.ColorTransfer, zscale, source.VideoStreamIndex, source.Width, source.Height,
-                item.Path);
+                PublicItemId(item), analysisPath, source.RuntimeMs, options, ffmpeg, source.Hdr, source.ColorTransfer, zscale,
+                useProxyAnalysis ? 0 : source.VideoStreamIndex, source.Width, source.Height,
+                item.Path, colorSourcePath: item.Path, colorVideoStreamIndex: source.VideoStreamIndex);
             return GenerationResponse(job, 0);
         }
         catch (InvalidOperationException ex)
@@ -1040,10 +1062,13 @@ public class StudioService : IService, IRequiresRequest
 
         var bytes = await ReadBodyAsync(request.RequestStream).ConfigureAwait(false);
         var info = StudioTrackFiles.ParseForSave(_parser, bytes, request.TrackId);
-        var path = StudioTrackFiles.GetSavePath(item.Path, request.TrackId);
+        var root = TrackStorageRoot();
+        var path = StudioTrackStorage.TrackPath(root, item.Path, ItemImdbId(item), request.TrackId);
+        var legacyPath = StudioTrackFiles.FindFile(item.Path, request.TrackId);
+        var conflictPath = File.Exists(path) ? path : legacyPath ?? path;
         try
         {
-            StudioTrackFiles.EnsureNoConflict(path, Request?.Headers?["If-Match"]);
+            StudioTrackFiles.EnsureNoConflict(conflictPath, Request?.Headers?["If-Match"]);
         }
         catch (TrackSaveConflictException ex)
         {
@@ -1060,7 +1085,10 @@ public class StudioService : IService, IRequiresRequest
             throw new ArgumentException($"Could not save track: {ex.Message}");
         }
 
-        ServerEntryPoint.Instance?.TrackDiscoveryService.InvalidateCache(item.Path);
+        var entry = ServerEntryPoint.Instance;
+        entry?.TrackDiscoveryService.InvalidateCache(item.Path);
+        if (legacyPath != null && !PathsEqual(legacyPath, path))
+            entry?.SelectionService.ReplaceTrackPath(legacyPath, path);
         var itemId = PublicItemId(item);
         var updated = StudioTrackFiles.UpdatedAtToken(path);
         IndexOrNull()?.Remember(request.TrackId, itemId, path);
@@ -1093,18 +1121,33 @@ public class StudioService : IService, IRequiresRequest
         if (track == null || !File.Exists(track.FilePath))
             throw new ResourceNotFoundException("Track not found for this movie");
 
+        var trackPaths = new[]
+        {
+            track.FilePath,
+            StudioTrackStorage.TrackPath(TrackStorageRoot(), item.Path, ItemImdbId(item), request.TrackId),
+            StudioTrackFiles.FindFile(item.Path, request.TrackId)
+        }.Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
         try
         {
-            File.Delete(track.FilePath);
+            foreach (var trackPath in trackPaths)
+                if (File.Exists(trackPath)) File.Delete(trackPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new ArgumentException($"Could not delete track: {ex.Message}");
         }
 
-        var sidecarPath = StudioSidecar.GetPath(item.Path, request.TrackId);
-        if (File.Exists(sidecarPath))
+        var sidecarPaths = new[]
         {
+            StudioSidecar.GetPathForTrackFile(track.FilePath, request.TrackId),
+            StudioSidecar.GetPath(item.Path, request.TrackId),
+            StudioTrackStorage.ProjectPath(TrackStorageRoot(), item.Path, ItemImdbId(item), request.TrackId)
+        }.Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var sidecarPath in sidecarPaths)
+        {
+            if (!File.Exists(sidecarPath)) continue;
             try
             {
                 File.Delete(sidecarPath);
@@ -1118,8 +1161,11 @@ public class StudioService : IService, IRequiresRequest
 
         var entry = ServerEntryPoint.Instance;
         entry?.TrackDiscoveryService.InvalidateCache(item.Path);
-        entry?.StudioTrackIndex.Forget(track.TrackId, track.FilePath);
-        entry?.SelectionService.ClearTrackPath(track.FilePath);
+        foreach (var trackPath in trackPaths)
+        {
+            entry?.StudioTrackIndex.Forget(track.TrackId, trackPath);
+            entry?.SelectionService.ClearTrackPath(trackPath);
+        }
         _logger.Info("Deleted Studio track '{0}' for item {1} at '{2}'", request.TrackId, itemId, track.FilePath);
         return new StudioTrackResponse { TrackId = request.TrackId, ItemId = itemId };
     }
@@ -1135,7 +1181,10 @@ public class StudioService : IService, IRequiresRequest
         if (string.IsNullOrEmpty(item.Path))
             throw new ResourceNotFoundException("Item has no file path");
 
-        var path = StudioSidecar.GetPath(item.Path, request.TrackId);
+        var path = StudioTrackStorage.ProjectPath(
+            TrackStorageRoot(), item.Path, ItemImdbId(item), request.TrackId);
+        if (!File.Exists(path))
+            path = StudioSidecar.GetPath(item.Path, request.TrackId);
         if (!File.Exists(path))
             throw new ResourceNotFoundException("Project sidecar not found");
 
@@ -1157,7 +1206,8 @@ public class StudioService : IService, IRequiresRequest
         var raw = await ReadLimitedAsync(request.RequestStream, StudioSidecar.MaxBytes, "Project body exceeds 4 MB")
             .ConfigureAwait(false);
         var bytes = StudioSidecar.Normalize(raw);
-        var path = StudioSidecar.GetPath(item.Path, request.TrackId);
+        var path = StudioTrackStorage.ProjectPath(
+            TrackStorageRoot(), item.Path, ItemImdbId(item), request.TrackId);
 
         try
         {
@@ -1338,7 +1388,7 @@ public class StudioService : IService, IRequiresRequest
 
         var (code, stdout, _) = await StudioProcess.RunAsync(
             ffprobe,
-            new[] { "-v", "error", "-print_format", "json", "-show_streams", "-show_format", SourcePath(item) },
+            new[] { "-v", "error", "-print_format", "json", "-show_streams", "-show_format", "-show_chapters", SourcePath(item) },
             CancellationToken.None).ConfigureAwait(false);
         if (code != 0 || stdout.Length == 0)
             return fallback;
@@ -1353,13 +1403,9 @@ public class StudioService : IService, IRequiresRequest
         };
     }
 
-    private static string ProxyOutputPath(BaseItem item, string itemId)
+    private static string ProxyOutputPath(BaseItem item)
     {
-        var movieDirectory = string.IsNullOrEmpty(item.Path) ? null : Path.GetDirectoryName(item.Path);
-        var directory = string.IsNullOrEmpty(movieDirectory)
-            ? Path.Combine(Plugin.Instance?.DataFolderPath ?? Path.GetTempPath(), "studio-proxy")
-            : Path.Combine(movieDirectory, "lightfx");
-        return Path.Combine(directory, SafeFileToken(itemId) + ".mp4");
+        return StudioTrackStorage.ProxyPath(TrackStorageRoot(), item.Path, ItemImdbId(item));
     }
 
     private void EnsureProxyIsSaved(string temporaryOutput, string durableOutput, string itemId)
@@ -1426,7 +1472,7 @@ public class StudioService : IService, IRequiresRequest
     private StudioProxyJob EnsureProxy(BaseItem item, StudioSourceInfo source)
     {
         var itemId = PublicItemId(item);
-        var durableOutput = ProxyOutputPath(item, itemId);
+        var durableOutput = ProxyOutputPath(item);
         var workspace = StudioSourceWorkspace.Find(itemId);
         var configuredTemp = Plugin.Instance?.GetPluginOptions().TranscodeTempDirectory;
         if (!string.IsNullOrWhiteSpace(configuredTemp) && workspace?.Snapshot().State != "ready")
@@ -1491,6 +1537,13 @@ public class StudioService : IService, IRequiresRequest
     private StudioMediaInfoResponse ToMediaInfo(BaseItem item, StudioSourceInfo source, StudioProxyJob job) => new()
     {
         RuntimeMs = source.RuntimeMs,
+        Chapters = source.Chapters?
+            .Select((chapter, index) => new StudioChapterResponse
+            {
+                TimeMs = chapter.TimeMs,
+                Title = string.IsNullOrWhiteSpace(chapter.Title) ? $"Chapter {index + 1}" : chapter.Title
+            })
+            .ToList() ?? new List<StudioChapterResponse>(),
         Width = source.Width,
         Height = source.Height,
         VideoCodec = source.VideoCodec,
@@ -1589,11 +1642,18 @@ public class StudioService : IService, IRequiresRequest
 
     private static int Even(int value) => value % 2 == 0 ? value : value - 1;
 
-    private static string SafeFileToken(string itemId)
+    private static string TrackStorageRoot()
     {
-        var chars = itemId.Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_').ToArray();
-        var token = new string(chars);
-        return token.Length == 0 ? "item" : token;
+        var plugin = Plugin.Instance;
+        var options = plugin?.GetPluginOptions();
+        return StudioTrackStorage.ResolveRoot(options?.LightfxStoragePath, plugin?.DataFolderPath);
+    }
+
+    private static string? ItemImdbId(BaseItem item)
+    {
+        string? imdbId = null;
+        item.ProviderIds?.TryGetValue("Imdb", out imdbId);
+        return imdbId;
     }
 
     private static string PublicItemId(BaseItem item) => StudioExternalId.PublicId(item);
@@ -1616,7 +1676,7 @@ public class StudioService : IService, IRequiresRequest
 
         var discovery = ServerEntryPoint.Instance?.TrackDiscoveryService
             ?? new TrackDiscoveryService(_parser, _logger);
-        var tracks = discovery.DiscoverTracks(item.Path, imdbId, scanPaths);
+        var tracks = discovery.DiscoverTracks(item.Path, imdbId, scanPaths, TrackStorageRoot());
         return StudioTrackFiles.ToListItems(PublicItemId(item), tracks).ToList();
     }
 
@@ -1639,7 +1699,10 @@ public class StudioService : IService, IRequiresRequest
             if (string.IsNullOrEmpty(movie.Path))
                 continue;
 
-            var found = StudioTrackFiles.FindFile(movie.Path, trackId);
+            string? imdbId = null;
+            movie.ProviderIds?.TryGetValue("Imdb", out imdbId);
+            var stored = StudioTrackStorage.TrackPath(TrackStorageRoot(), movie.Path, imdbId, trackId);
+            var found = File.Exists(stored) ? stored : StudioTrackFiles.FindFile(movie.Path, trackId);
             if (found == null)
                 continue;
 

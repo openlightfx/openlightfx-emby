@@ -64,6 +64,10 @@ public class PluginOptions : EditableOptionsBase
     public bool ShowFlashingWarnings { get; set; } = true;
 
     // --- Studio Media Processing ---
+    [DisplayName("LightFX Storage Location")]
+    [Description("Root directory for saved .lightfx tracks, Studio project sidecars, and generated edit proxies. Leave blank to use OpenLightFX's plugin data directory. Set an absolute path on a drive with enough free space, outside all Emby media libraries. The Emby service account needs permission to create, read, write, and delete files there.")]
+    public string LightfxStoragePath { get; set; } = "";
+
     [DisplayName("Transcode Temporary Directory")]
     [Description("Optional local or fast-storage directory used while Studio analyzes movies. Studio copies the movie here when creating a track and removes the copy when the editor closes. The Emby service account needs permission to read, create, write, and delete files in this folder. On Linux, for example: sudo chown emby:emby /path/to/folder && sudo chmod 750 /path/to/folder (replace emby with the account running Emby). On Windows, grant the Emby service account Modify permission. Leave blank to process the library file directly.")]
     public string TranscodeTempDirectory { get; set; } = "";
