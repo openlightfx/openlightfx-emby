@@ -172,6 +172,15 @@ public class EditMediaTests
         Assert.Contains("-flush_packets 1", args);
         Assert.DoesNotContain("-re", args, StringComparison.Ordinal);
         Assert.DoesNotContain("Transcode", args, StringComparison.OrdinalIgnoreCase);
+
+        var gpuArgs = string.Join(" ", StudioProxyPlan.Arguments("/in.mkv", "/out.mp4", fps, useGpuEncoder: true));
+        Assert.Contains("-c:v h264_nvenc", gpuArgs);
+        Assert.Contains("-preset p4", gpuArgs);
+        Assert.Contains("-g " + StudioProxyPlan.GopFrames(fps), gpuArgs);
+        Assert.Contains("-bf 0", gpuArgs);
+        Assert.Contains("-c:a aac", gpuArgs);
+        Assert.DoesNotContain("libx264", gpuArgs, StringComparison.Ordinal);
+        Assert.DoesNotContain("-x264-params", gpuArgs, StringComparison.Ordinal);
     }
 
     [Fact(DisplayName = "MEDIA-004 @fixture the edit URL is not an Emby transcode")]

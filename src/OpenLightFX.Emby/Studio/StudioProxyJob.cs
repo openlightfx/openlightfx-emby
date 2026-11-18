@@ -94,7 +94,13 @@ public sealed class StudioProxyJob
         Volatile.Write(ref _state, 2);
     }
 
-    public void Start(string ffmpegPath, IReadOnlyList<string> arguments)
+    public void Start(
+        string ffmpegPath,
+        IReadOnlyList<string> arguments,
+        IReadOnlyList<string>? softwareFallbackArguments = null) =>
+        StartAttempt(ffmpegPath, arguments, softwareFallbackArguments);
+
+    private void StartAttempt(string ffmpegPath, IReadOnlyList<string> arguments, IReadOnlyList<string>? fallbackArguments)
     {
         var process = new Process
         {
@@ -108,34 +114,67 @@ public sealed class StudioProxyJob
         };
         process.Exited += (_, _) =>
         {
+            var exitCode = -1;
+            try { exitCode = process.ExitCode; } catch { }
+            process.Dispose();
+
+            if (exitCode != 0 && fallbackArguments != null)
+            {
+                // Hardware encoders can be present in FFmpeg but unavailable to the
+                // Emby process (driver/device permissions). Retry in software.
+                DiscardPartial(OutputPath);
+                Interlocked.Exchange(ref _encodedThroughMs, 0);
+                StartAttempt(ffmpegPath, fallbackArguments, null);
+                return;
+            }
+
             try
             {
-                if (process.ExitCode == 0 && File.Exists(OutputPath))
+                if (exitCode == 0 && File.Exists(OutputPath))
                 {
                     File.WriteAllText(CompleteMarkerPath, StudioProxyPlan.CacheVersion);
                     MarkReady(Math.Max(EncodedThroughMs, 0));
                 }
                 else
-                    MarkFailed($"ffmpeg exited with code {process.ExitCode}");
+                    MarkFailed($"ffmpeg exited with code {exitCode}");
             }
             catch
             {
                 MarkFailed("ffmpeg exited with code unknown");
             }
-            finally
-            {
-                process.Dispose();
-            }
         };
 
-        if (!process.Start())
+        try
         {
-            MarkFailed("ffmpeg failed to start");
-            return;
-        }
+            if (!process.Start())
+            {
+                process.Dispose();
+                if (fallbackArguments != null)
+                {
+                    DiscardPartial(OutputPath);
+                    Interlocked.Exchange(ref _encodedThroughMs, 0);
+                    StartAttempt(ffmpegPath, fallbackArguments, null);
+                }
+                else
+                    MarkFailed("ffmpeg failed to start");
+                return;
+            }
 
-        process.BeginErrorReadLine();
-        process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            process.BeginOutputReadLine();
+        }
+        catch
+        {
+            process.Dispose();
+            if (fallbackArguments != null)
+            {
+                DiscardPartial(OutputPath);
+                Interlocked.Exchange(ref _encodedThroughMs, 0);
+                StartAttempt(ffmpegPath, fallbackArguments, null);
+            }
+            else
+                MarkFailed("ffmpeg failed to start");
+        }
     }
 
     private static int Even(int value)

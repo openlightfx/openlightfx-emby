@@ -109,7 +109,7 @@ public static class StudioProxyPlan
 {
     public const int MaxLongSide = 1280;
     // Cache markers from older encoders must not revive the AAC-shifted timeline.
-    public const string CacheVersion = "source-timeline-v2";
+    public const string CacheVersion = "source-timeline-v3-gpu-encode";
 
     public static int GopFrames(double fps)
     {
@@ -123,7 +123,12 @@ public static class StudioProxyPlan
 
     public static int IntervalMs(double fps) => IntervalMs(fps < 1 ? 24 : fps, GopFrames(fps));
 
-    public static IReadOnlyList<string> Arguments(string inputPath, string outputPath, double fps, int? videoStreamIndex = null)
+    public static IReadOnlyList<string> Arguments(
+        string inputPath,
+        string outputPath,
+        double fps,
+        int? videoStreamIndex = null,
+        bool useGpuEncoder = false)
     {
         var gop = GopFrames(fps);
         var scale =
@@ -134,8 +139,8 @@ public static class StudioProxyPlan
         var args = new List<string> { "-y" };
         if (RealtimeRead())
             args.Add("-re");
-        // Accelerate source decoding when FFmpeg can use a server GPU. Keep the
-        // H.264 encoder below on libx264; hardware encoding is not required here.
+        // Accelerate decoding and (when requested) use NVIDIA NVENC for H.264 encoding.
+        // A software-encode argument set is retained as the runtime fallback.
         args.AddRange(new[] { "-hwaccel", "auto" });
         args.AddRange(new[]
         {
@@ -143,16 +148,29 @@ public static class StudioProxyPlan
             "-map", videoStreamIndex is int index ? $"0:{index}" : "0:v:0",
             "-map", "0:a:0?",
             "-vf", scale,
-            "-c:v", "libx264",
+            "-c:v", useGpuEncoder ? "h264_nvenc" : "libx264",
             "-pix_fmt", "yuv420p",
             "-profile:v", "high",
-            "-preset", "veryfast",
             "-g", gop.ToString(CultureInfo.InvariantCulture),
             "-keyint_min", gop.ToString(CultureInfo.InvariantCulture),
-            "-sc_threshold", "0",
-            "-x264-params", $"keyint={gop}:min-keyint={gop}:scenecut=0:open-gop=0",
             "-flags", "+cgop",
             "-bf", "0",
+        });
+        if (useGpuEncoder)
+        {
+            args.AddRange(new[] { "-preset", "p4", "-rc", "vbr", "-cq", "23", "-b:v", "0", "-no-scenecut", "1" });
+        }
+        else
+        {
+            args.AddRange(new[]
+            {
+                "-preset", "veryfast",
+                "-sc_threshold", "0",
+                "-x264-params", $"keyint={gop}:min-keyint={gop}:scenecut=0:open-gop=0"
+            });
+        }
+        args.AddRange(new[]
+        {
             "-c:a", "aac",
             "-ac", "2",
             "-b:a", "128k",

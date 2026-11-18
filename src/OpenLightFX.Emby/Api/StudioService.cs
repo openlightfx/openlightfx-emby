@@ -1250,7 +1250,11 @@ public class StudioService : IService, IRequiresRequest
 
             try
             {
-                job.Start(RequireTool(FfmpegPath(), "ffmpeg"), StudioProxyPlan.Arguments(item.Path, output, source.Fps, source.VideoStreamIndex));
+                var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
+                job.Start(
+                    ffmpeg,
+                    StudioProxyPlan.Arguments(item.Path, output, source.Fps, source.VideoStreamIndex, useGpuEncoder: true),
+                    StudioProxyPlan.Arguments(item.Path, output, source.Fps, source.VideoStreamIndex));
             }
             catch (Exception ex)
             {
