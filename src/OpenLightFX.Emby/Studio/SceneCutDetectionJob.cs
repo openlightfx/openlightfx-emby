@@ -141,7 +141,7 @@ public sealed class SceneCutDetectionJob
             if (source.Size < 0)
                 throw new InvalidOperationException("The completed proxy could not be found");
             var (width, _) = AiTrackAnalysis.DetectionSize(_sourceWidth, _sourceHeight);
-            SceneCutStore.Open().Save(SceneCutDocument.Create(
+            SceneCutStore.Open().SaveDetection(SceneCutDocument.Create(
                 ItemId, source, _threshold, width, DurationMs / 1000.0, Snapshot().Cuts));
             lock (_gate)
             {
@@ -213,7 +213,7 @@ public sealed class SceneCutDetectionJob
             var stderr = await stderrTask.ConfigureAwait(false);
             if (process.ExitCode != 0)
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "ffmpeg could not analyze the movie" : "ffmpeg could not analyze the movie");
-            SceneCutStore.Open().Save(SceneCutDocument.Create(
+            SceneCutStore.Open().SaveDetection(SceneCutDocument.Create(
                 ItemId, analyzed, _threshold, detectWidth, DurationMs / 1000.0, Snapshot().Cuts));
             lock (_gate)
             {

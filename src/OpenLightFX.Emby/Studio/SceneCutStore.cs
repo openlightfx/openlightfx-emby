@@ -5,10 +5,35 @@ using System.Text.Json.Serialization;
 namespace OpenLightFX.Emby.Studio;
 
 /// <summary>
-/// One movie's saved ContentDetector cuts. The file is
-/// <c>{plugin data}/OpenLightFX/scene-cuts/{itemId}.json</c>.
+/// One scene marker on a movie's timeline. <c>kind</c> is <c>detected</c> (from ContentDetector;
+/// a re-run replaces these) or <c>manual</c> (placed by a person; kept across re-runs).
+/// Times are whole milliseconds. Detected ids are <c>d{originalMs}</c>, manual ids <c>m{random}</c>.
+/// </summary>
+public sealed class SceneMarkerEntry
+{
+    public const string Detected = "detected";
+    public const string Manual = "manual";
+
+    public string Id { get; set; } = "";
+    public long TimeMs { get; set; }
+    public string Kind { get; set; } = Detected;
+    public string Label { get; set; } = "";
+
+    public bool IsDetected => !string.Equals(Kind, Manual, StringComparison.Ordinal);
+
+    public static SceneMarkerEntry FromDetection(long timeMs) =>
+        new() { Id = "d" + timeMs.ToString(CultureInfo.InvariantCulture), TimeMs = timeMs, Kind = Detected };
+
+    public static SceneMarkerEntry CreateManual(long timeMs, string label) =>
+        new() { Id = "m" + Guid.NewGuid().ToString("N")[..12], TimeMs = timeMs, Kind = Manual, Label = label };
+}
+
+/// <summary>
+/// The one store of a movie's scene markers: ContentDetector cuts plus markers a person added,
+/// moved, renamed, or deleted. The file is <c>{plugin data}/OpenLightFX/scene-cuts/{itemId}.json</c>.
 /// <c>source</c> is the completed edit proxy's path, size, and UTC mtime so a later open can tell
-/// the result is stale. <c>detector.version</c> is <see cref="ContentDetector.PersistenceVersion"/>.
+/// the detection is stale. <c>detector.version</c> is <see cref="ContentDetector.PersistenceVersion"/>.
+/// Re-running detection replaces only <c>detected</c> markers (see <see cref="WithManualFrom"/>).
 /// </summary>
 public sealed class SceneCutDocument
 {
@@ -16,15 +41,48 @@ public sealed class SceneCutDocument
     public SceneCutSource Source { get; set; } = new();
     public SceneCutDetectorSettings Detector { get; set; } = new();
     public double DurationSeconds { get; set; }
-    public List<double> Cuts { get; set; } = new();
+    public List<SceneMarkerEntry> Markers { get; set; } = new();
     public string UpdatedAt { get; set; } = "";
+
+    /// <summary>Pre-marker files stored detected cuts as seconds. Read once, then written as markers.</summary>
+    [JsonPropertyName("cuts"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<double>? LegacyCuts { get; set; }
+
+    /// <summary>False for a document that only holds manual markers (detection never finished).</summary>
+    [JsonIgnore]
+    public bool HasDetection => !string.IsNullOrEmpty(Source.Path);
+
+    /// <summary>Markers a consumer should see: detected ones only while the detection is current.</summary>
+    public IReadOnlyList<SceneMarkerEntry> VisibleMarkers(bool includeDetected) =>
+        Markers.Where(marker => includeDetected || !marker.IsDetected)
+            .OrderBy(marker => marker.TimeMs)
+            .ThenBy(marker => marker.Id, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>All current scene marker times in seconds, ascending and distinct.</summary>
+    public IReadOnlyList<double> CutSeconds(bool includeDetected = true) =>
+        VisibleMarkers(includeDetected).Select(marker => marker.TimeMs / 1000.0).Distinct().ToList();
+
+    /// <summary>This detection result plus <paramref name="existing"/>'s manual markers.</summary>
+    public SceneCutDocument WithManualFrom(SceneCutDocument? existing)
+    {
+        if (existing == null) return this;
+        Markers = Markers.Where(marker => marker.IsDetected)
+            .Concat(existing.Markers.Where(marker => !marker.IsDetected))
+            .ToList();
+        if (string.CompareOrdinal(existing.UpdatedAt, UpdatedAt) > 0)
+            UpdatedAt = existing.UpdatedAt;
+        return this;
+    }
+
+    public void Touch() => UpdatedAt = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture);
 
     public static SceneCutDocument Create(string itemId, SceneCutSource source, double threshold, int width, double durationSeconds, IReadOnlyList<int> cutFrames)
     {
-        var cuts = cutFrames
+        var markers = cutFrames
             .Distinct()
             .OrderBy(frame => frame)
-            .Select(frame => frame / AiTrackAnalysis.DetectionFps)
+            .Select(frame => SceneMarkerEntry.FromDetection((long)Math.Round(frame * 1000 / AiTrackAnalysis.DetectionFps)))
             .ToList();
         return new SceneCutDocument
         {
@@ -40,7 +98,7 @@ public sealed class SceneCutDocument
                 MinSceneLen = ContentDetector.DefaultMinSceneLength
             },
             DurationSeconds = durationSeconds,
-            Cuts = cuts,
+            Markers = markers,
             UpdatedAt = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture)
         };
     }
@@ -130,7 +188,13 @@ public sealed class SceneCutStore
     {
         if (string.IsNullOrWhiteSpace(document.ItemId))
             throw new ArgumentException("Scene cuts need an item id");
-        document.Cuts = document.Cuts.Distinct().OrderBy(cut => cut).ToList();
+        document.LegacyCuts = null;
+        document.Markers = document.Markers
+            .GroupBy(marker => marker.Id, StringComparer.Ordinal)
+            .Select(group => group.Last())
+            .OrderBy(marker => marker.TimeMs)
+            .ThenBy(marker => marker.Id, StringComparer.Ordinal)
+            .ToList();
         var path = PathFor(document.ItemId);
         var json = JsonSerializer.Serialize(document, JsonOptions);
         lock (IoGate)
@@ -152,7 +216,26 @@ public sealed class SceneCutStore
                 var document = JsonSerializer.Deserialize<SceneCutDocument>(File.ReadAllText(path), JsonOptions);
                 if (document == null) return null;
                 document.ItemId = string.IsNullOrWhiteSpace(document.ItemId) ? itemId : document.ItemId;
-                document.Cuts = document.Cuts?.Distinct().OrderBy(cut => cut).ToList() ?? new List<double>();
+                document.Markers ??= new List<SceneMarkerEntry>();
+                if (document.Markers.Count == 0 && document.LegacyCuts is { Count: > 0 } legacy)
+                {
+                    document.Markers = legacy
+                        .Where(seconds => double.IsFinite(seconds) && seconds > 0)
+                        .Select(seconds => SceneMarkerEntry.FromDetection((long)Math.Round(seconds * 1000)))
+                        .GroupBy(marker => marker.Id, StringComparer.Ordinal)
+                        .Select(group => group.First())
+                        .ToList();
+                }
+                document.LegacyCuts = null;
+                foreach (var marker in document.Markers)
+                {
+                    marker.Kind = marker.IsDetected ? SceneMarkerEntry.Detected : SceneMarkerEntry.Manual;
+                    marker.Label ??= "";
+                    if (string.IsNullOrWhiteSpace(marker.Id))
+                        marker.Id = marker.IsDetected
+                            ? "d" + marker.TimeMs.ToString(CultureInfo.InvariantCulture)
+                            : "m" + Guid.NewGuid().ToString("N")[..12];
+                }
                 document.Source ??= new SceneCutSource();
                 document.Detector ??= new SceneCutDetectorSettings();
                 return document;
@@ -161,6 +244,36 @@ public sealed class SceneCutStore
             {
                 return null;
             }
+        }
+    }
+
+    /// <summary>Save a detection result, keeping the movie's manual markers.</summary>
+    public void SaveDetection(SceneCutDocument detected)
+    {
+        lock (IoGate) Save(detected.WithManualFrom(TryLoad(detected.ItemId)));
+    }
+
+    /// <summary>
+    /// Read-modify-write one movie's markers under the store lock. <paramref name="edit"/> receives
+    /// the saved document (a manual-only one is created when none exists) and returns false to skip
+    /// the write.
+    /// </summary>
+    public SceneCutDocument Update(string itemId, double durationSeconds, Func<SceneCutDocument, bool> edit)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+            throw new ArgumentException("Scene cuts need an item id");
+        lock (IoGate)
+        {
+            var document = TryLoad(itemId) ?? new SceneCutDocument
+            {
+                ItemId = itemId,
+                Source = new SceneCutSource(),
+                DurationSeconds = durationSeconds
+            };
+            if (!edit(document)) return document;
+            document.Touch();
+            Save(document);
+            return document;
         }
     }
 

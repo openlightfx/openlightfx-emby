@@ -7,13 +7,16 @@ using OpenLightFX.Emby.Studio;
 namespace OpenLightFX.Emby.Api;
 
 /// <summary>
-/// Scene cuts for the Studio timeline.
+/// Scene markers for the Studio timeline: the movie's one marker store (detected cuts plus
+/// markers a person placed). Studio keeps no scene markers of its own.
 ///
 /// GET /OpenLightFX/Studio/Items/{ItemId}/SceneCuts
 /// 200 JSON:
 /// { "itemId", "status": "ready"|"running"|"none"|"stale",
 ///   "detector": { "name": "ContentDetector", "threshold", "fps", "minSceneLen" },
-///   "durationSeconds", "cuts": [seconds ascending], "updatedAt" }
+///   "durationSeconds", "cuts": [seconds ascending],
+///   "markers": [{ "id", "timeMs", "kind": "detected"|"manual", "label" }], "updatedAt" }
+/// <c>cuts</c> is every marker time in seconds. Detected markers are withheld while stale.
 /// <c>threshold</c> is PySceneDetect's content score (the 0.01–1 slider times 100).
 /// <c>running</c> wins over a saved result. <c>stale</c> means the media file's path, size, or
 /// mtime changed, or the detector version/fps/min scene length no longer matches. Saved cuts are
@@ -26,6 +29,14 @@ namespace OpenLightFX.Emby.Api;
 ///
 /// GET /OpenLightFX/Studio/SceneCuts/{JobId}
 /// Same job JSON as the POST response.
+///
+/// Marker edits (Admin). Each returns the updated scene-cut JSON above.
+/// POST   /OpenLightFX/Studio/Items/{ItemId}/SceneCuts/Markers              { "timeMs", "label"? }  add a manual marker
+/// PUT    /OpenLightFX/Studio/Items/{ItemId}/SceneCuts/Markers/{MarkerId}   { "timeMs"?, "label"? } move or rename
+/// DELETE /OpenLightFX/Studio/Items/{ItemId}/SceneCuts/Markers/{MarkerId}                           delete
+/// Times are whole milliseconds inside the movie. A moved detected marker stays detected.
+/// Re-running detection replaces detected markers and keeps manual ones, so detected markers
+/// cannot be edited while detection runs (409). 404 when the marker id is unknown.
 /// </summary>
 [Route("/OpenLightFX/Studio/Items/{ItemId}/SceneCuts", "GET", Description = "Scene cuts for the timeline")]
 [Authenticated]
@@ -46,6 +57,45 @@ public class PostStudioSceneCuts : IReturn<StudioSceneCutJobResponse>
     public double? SceneCutThreshold { get; set; }
 }
 
+[Route("/OpenLightFX/Studio/Items/{ItemId}/SceneCuts/Markers", "POST", Description = "Add a scene marker")]
+[Authenticated(Roles = "Admin")]
+[DataContract]
+public class PostStudioSceneMarker : IReturn<StudioSceneCutsResponse>
+{
+    public string ItemId { get; set; } = "";
+
+    [DataMember(Name = "timeMs"), JsonPropertyName("timeMs")]
+    public long? TimeMs { get; set; }
+
+    [DataMember(Name = "label"), JsonPropertyName("label")]
+    public string? Label { get; set; }
+}
+
+[Route("/OpenLightFX/Studio/Items/{ItemId}/SceneCuts/Markers/{MarkerId}", "PUT", Description = "Move or rename a scene marker")]
+[Authenticated(Roles = "Admin")]
+[DataContract]
+public class PutStudioSceneMarker : IReturn<StudioSceneCutsResponse>
+{
+    public string ItemId { get; set; } = "";
+
+    public string MarkerId { get; set; } = "";
+
+    [DataMember(Name = "timeMs"), JsonPropertyName("timeMs")]
+    public long? TimeMs { get; set; }
+
+    [DataMember(Name = "label"), JsonPropertyName("label")]
+    public string? Label { get; set; }
+}
+
+[Route("/OpenLightFX/Studio/Items/{ItemId}/SceneCuts/Markers/{MarkerId}", "DELETE", Description = "Delete a scene marker")]
+[Authenticated(Roles = "Admin")]
+public class DeleteStudioSceneMarker : IReturn<StudioSceneCutsResponse>
+{
+    public string ItemId { get; set; } = "";
+
+    public string MarkerId { get; set; } = "";
+}
+
 [Route("/OpenLightFX/Studio/SceneCuts/{JobId}", "GET", Description = "Scene cut detection progress")]
 [Authenticated(Roles = "Admin")]
 public class GetStudioSceneCutJob : IReturn<StudioSceneCutJobResponse>
@@ -61,7 +111,17 @@ public sealed class StudioSceneCutsResponse
     [DataMember(Name = "detector"), JsonPropertyName("detector")] public StudioSceneCutDetectorResponse Detector { get; set; } = new();
     [DataMember(Name = "durationSeconds"), JsonPropertyName("durationSeconds")] public double DurationSeconds { get; set; }
     [DataMember(Name = "cuts"), JsonPropertyName("cuts")] public List<double> Cuts { get; set; } = new();
+    [DataMember(Name = "markers"), JsonPropertyName("markers")] public List<StudioSceneMarkerResponse> Markers { get; set; } = new();
     [DataMember(Name = "updatedAt"), JsonPropertyName("updatedAt")] public string UpdatedAt { get; set; } = "";
+}
+
+[DataContract]
+public sealed class StudioSceneMarkerResponse
+{
+    [DataMember(Name = "id"), JsonPropertyName("id")] public string Id { get; set; } = "";
+    [DataMember(Name = "timeMs"), JsonPropertyName("timeMs")] public long TimeMs { get; set; }
+    [DataMember(Name = "kind"), JsonPropertyName("kind")] public string Kind { get; set; } = SceneMarkerEntry.Detected;
+    [DataMember(Name = "label"), JsonPropertyName("label")] public string Label { get; set; } = "";
 }
 
 [DataContract]
@@ -97,24 +157,31 @@ public static class SceneCutApi
 
     public static StudioSceneCutsResponse Response(string itemId, SceneCutDocument? saved, SceneCutSource? current, bool running, double liveDurationSeconds)
     {
-        if (saved == null)
+        if (saved == null || !saved.HasDetection)
         {
+            // No detection yet; a manual-only document still carries the person's markers.
+            var manual = saved?.VisibleMarkers(includeDetected: false) ?? Array.Empty<SceneMarkerEntry>();
             return new StudioSceneCutsResponse
             {
                 ItemId = itemId,
                 Status = running ? "running" : "none",
-                DurationSeconds = liveDurationSeconds,
+                DurationSeconds = saved is { DurationSeconds: > 0 } ? saved.DurationSeconds : liveDurationSeconds,
+                Cuts = manual.Select(marker => marker.TimeMs / 1000.0).Distinct().ToList(),
+                Markers = manual.Select(MarkerResponse).ToList(),
+                UpdatedAt = saved?.UpdatedAt ?? "",
                 Detector = Defaults()
             };
         }
 
         var status = saved.Status(current, running);
+        var markers = saved.VisibleMarkers(includeDetected: status != "stale");
         return new StudioSceneCutsResponse
         {
             ItemId = itemId,
             Status = status,
             DurationSeconds = saved.DurationSeconds,
-            Cuts = status == "stale" ? new List<double>() : saved.Cuts.ToList(),
+            Cuts = markers.Select(marker => marker.TimeMs / 1000.0).Distinct().ToList(),
+            Markers = markers.Select(MarkerResponse).ToList(),
             UpdatedAt = saved.UpdatedAt,
             Detector = new StudioSceneCutDetectorResponse
             {
@@ -139,6 +206,30 @@ public static class SceneCutApi
             ThroughMs = snapshot.ThroughMs
         };
     }
+
+    /// <summary>Validate a marker time: whole milliseconds, after the start, inside the movie.</summary>
+    public static long RequireMarkerTime(long? timeMs, double durationSeconds)
+    {
+        if (timeMs is not long value || value <= 0)
+            throw new ArgumentException("timeMs must be a positive whole number of milliseconds");
+        if (durationSeconds > 0 && value > Math.Round(durationSeconds * 1000))
+            throw new ArgumentException("timeMs is past the end of the movie");
+        return value;
+    }
+
+    public static string MarkerLabel(string? label)
+    {
+        var trimmed = (label ?? "").Trim();
+        return trimmed.Length <= 200 ? trimmed : trimmed[..200];
+    }
+
+    private static StudioSceneMarkerResponse MarkerResponse(SceneMarkerEntry marker) => new()
+    {
+        Id = marker.Id,
+        TimeMs = marker.TimeMs,
+        Kind = marker.IsDetected ? SceneMarkerEntry.Detected : SceneMarkerEntry.Manual,
+        Label = marker.Label
+    };
 
     private static StudioSceneCutDetectorResponse Defaults() => new()
     {

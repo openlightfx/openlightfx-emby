@@ -12,7 +12,7 @@ namespace OpenLightFX.Emby.Tests;
 public class StudioSourceWorkspaceTests
 {
     [Fact]
-    public async Task Configured_directory_receives_source_copy_and_release_deletes_it()
+    public async Task Configured_directory_retains_completed_source_copy_after_release()
     {
         var root = Directory.CreateTempSubdirectory("olfx-source-workspace-");
         var itemId = Guid.NewGuid().ToString("N");
@@ -29,7 +29,7 @@ public class StudioSourceWorkspaceTests
             Assert.Equal("ready", workspace.Snapshot().State);
             Assert.Equal(content, await File.ReadAllBytesAsync(workspace.TargetPath));
             StudioSourceWorkspace.Release(itemId);
-            Assert.False(File.Exists(workspace.TargetPath));
+            Assert.True(File.Exists(workspace.TargetPath));
         }
         finally
         {

@@ -4,15 +4,11 @@ namespace OpenLightFX.Emby.Studio;
 
 /// <summary>
 /// Studio-only project document stored beside the track. Playback does not read it.
+/// Scene markers are not stored here: they live in the movie's <see cref="SceneCutStore"/> document.
 /// </summary>
 public static class StudioSidecar
 {
     public const int MaxBytes = 4 * 1024 * 1024;
-
-    private static readonly HashSet<string> MarkerKinds = new(StringComparer.Ordinal)
-    {
-        "manual", "chapter", "detected"
-    };
 
     private static readonly HashSet<string> GroupModes = new(StringComparer.Ordinal)
     {
@@ -34,7 +30,8 @@ public static class StudioSidecar
     }
 
     /// <summary>
-    /// Accept version 1 JSON up to 4 MiB. Drop undo and duration so the file stays editor state.
+    /// Accept version 1 JSON up to 4 MiB. Drop undo and duration so the file stays editor state,
+    /// and scene markers, which belong to the movie's scene-cut document.
     /// </summary>
     public static byte[] Normalize(byte[] body)
     {
@@ -76,7 +73,8 @@ public static class StudioSidecar
                 {
                     if (property.NameEquals("undo") || property.NameEquals("Undo")
                         || property.NameEquals("duration") || property.NameEquals("Duration")
-                        || property.NameEquals("undoStack") || property.NameEquals("UndoStack"))
+                        || property.NameEquals("undoStack") || property.NameEquals("UndoStack")
+                        || IsSceneMarkers(property.Name))
                         continue;
                     property.WriteTo(writer);
                 }
@@ -87,21 +85,65 @@ public static class StudioSidecar
         }
     }
 
-    private static void ValidateCollections(JsonElement root)
+    /// <summary>
+    /// One-time migration for sidecars written before scene markers moved to the scene-cut store:
+    /// returns the stored document without <c>sceneMarkers</c> and the markers it held
+    /// (whole-millisecond time and label). Malformed entries are skipped.
+    /// </summary>
+    public static (byte[] Document, List<(long TimeMs, string Label)> Markers) ExtractSceneMarkers(byte[] body)
     {
-        if (TryGetProperty(root, "sceneMarkers", out var markers) && markers.ValueKind == JsonValueKind.Array)
+        var markers = new List<(long, string)>();
+        JsonDocument doc;
+        try
         {
-            foreach (var marker in markers.EnumerateArray())
-            {
-                if (TryGetProperty(marker, "kind", out var kind)
-                    && kind.ValueKind == JsonValueKind.String
-                    && !MarkerKinds.Contains(kind.GetString() ?? ""))
-                {
-                    throw new ArgumentException($"scene marker kind '{kind.GetString()}' is not manual, chapter, or detected");
-                }
-            }
+            doc = JsonDocument.Parse(body);
+        }
+        catch (JsonException)
+        {
+            return (body, markers);
         }
 
+        using (doc)
+        {
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.EnumerateObject().Any(property => IsSceneMarkers(property.Name)))
+                return (body, markers);
+
+            foreach (var property in doc.RootElement.EnumerateObject().Where(property => IsSceneMarkers(property.Name)))
+            {
+                if (property.Value.ValueKind != JsonValueKind.Array) continue;
+                foreach (var marker in property.Value.EnumerateArray())
+                {
+                    if (!TryGetProperty(marker, "timeMs", out var time) || time.ValueKind != JsonValueKind.Number
+                        || !time.TryGetDouble(out var timeMs) || !double.IsFinite(timeMs) || timeMs <= 0)
+                        continue;
+                    var label = TryGetProperty(marker, "label", out var text) && text.ValueKind == JsonValueKind.String
+                        ? text.GetString() ?? ""
+                        : "";
+                    markers.Add(((long)Math.Round(timeMs), label));
+                }
+            }
+
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                foreach (var property in doc.RootElement.EnumerateObject())
+                {
+                    if (IsSceneMarkers(property.Name)) continue;
+                    property.WriteTo(writer);
+                }
+                writer.WriteEndObject();
+            }
+            return (stream.ToArray(), markers);
+        }
+    }
+
+    private static bool IsSceneMarkers(string name) =>
+        name.Equals("sceneMarkers", StringComparison.OrdinalIgnoreCase);
+
+    private static void ValidateCollections(JsonElement root)
+    {
         if (TryGetProperty(root, "channelGroups", out var groups) && groups.ValueKind == JsonValueKind.Array)
         {
             foreach (var group in groups.EnumerateArray())

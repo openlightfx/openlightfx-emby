@@ -624,13 +624,11 @@ public class StudioService : IService, IRequiresRequest
         if (string.IsNullOrWhiteSpace(configured)) return new StudioSourceWorkspaceResponse { Required = false };
         var itemId = PublicItemId(item);
         var durableProxyPath = ProxyOutputPath(item);
-        var cuts = SceneCutStore.Open().TryLoad(itemId);
-        var cutsReady = StudioProxyJob.IsComplete(durableProxyPath)
-            && cuts != null
-            && cuts.Status(SceneCutSource.Capture(durableProxyPath), SceneCutActivity.IsRunning(itemId)) == "ready"
-            && Math.Abs(cuts.Detector.Threshold - ConfiguredSceneCutThreshold()) < 0.0001;
+        // Scene detection and prefill now run on the edit proxy. If it is already
+        // complete, copy only that artifact to fast storage, even when cuts need rerunning.
+        var proxyReady = StudioProxyJob.IsComplete(durableProxyPath);
         var workspace = StudioSourceWorkspace.Start(
-            itemId, item.Path, configured, ProxyOutputPath(item), proxyOnly: cutsReady);
+            itemId, item.Path, configured, durableProxyPath, proxyOnly: proxyReady);
         return SourceWorkspaceResponse(workspace, required: true);
     }
 
@@ -693,11 +691,7 @@ public class StudioService : IService, IRequiresRequest
         var item = RequireItem(request.ItemId);
         var source = await ProbeAsync(item).ConfigureAwait(false);
         var itemId = PublicItemId(item);
-        var configuredTemp = Plugin.Instance?.GetPluginOptions().TranscodeTempDirectory;
-        var workspace = StudioSourceWorkspace.Find(itemId);
-        var job = !string.IsNullOrWhiteSpace(configuredTemp) && workspace == null
-            ? StudioProxyJob.Missing(itemId, source.Fps, OutputSize(source.Width, source.Height).Width, OutputSize(source.Width, source.Height).Height)
-            : EnsureProxy(item, source);
+        var job = EnsureProxy(item, source);
         if (job.State == "ready")
             EnsureSceneCutDetection(item, source, job);
         StudioSessionAuth.Remember(Request, StudioTicketScope.ProxyMedia);
@@ -739,13 +733,14 @@ public class StudioService : IService, IRequiresRequest
 
         var source = await ProbeAsync(item).ConfigureAwait(false);
         var proxy = EnsureProxy(item, source);
-        if (proxy.State != "ready")
+        var analysisPath = proxy.OutputPath;
+        if (proxy.State != "ready" || !StudioProxyJob.IsComplete(analysisPath))
             throw new ConflictException("Wait for the edit proxy to finish processing before pre-filling the track");
-        var proxyPath = ProxyOutputPath(item);
+        var durableProxyPath = ProxyOutputPath(item);
         var sceneCuts = SceneCutStore.Open().TryLoad(PublicItemId(item));
-        if (!StudioProxyJob.IsComplete(proxyPath)
+        if (!StudioProxyJob.IsComplete(durableProxyPath)
             || sceneCuts == null
-            || sceneCuts.Status(SceneCutSource.Capture(proxyPath), SceneCutActivity.IsRunning(PublicItemId(item))) != "ready"
+            || sceneCuts.Status(SceneCutSource.Capture(durableProxyPath), SceneCutActivity.IsRunning(PublicItemId(item))) != "ready"
             || Math.Abs(sceneCuts.Detector.Threshold - ConfiguredSceneCutThreshold()) >= 0.0001)
             throw new ConflictException("Wait for scene detection to finish before pre-filling the track");
         var ffmpeg = RequireTool(FfmpegPath(), "ffmpeg");
@@ -761,9 +756,9 @@ public class StudioService : IService, IRequiresRequest
         try
         {
             var job = AiTrackGenerationJobs.Start(
-                PublicItemId(item), proxyPath, source.RuntimeMs, options, ffmpeg, source.Hdr, source.ColorTransfer, zscale,
+                PublicItemId(item), analysisPath, source.RuntimeMs, options, ffmpeg, source.Hdr, source.ColorTransfer, zscale,
                 videoStreamIndex: 0, sourceWidth: proxy.Width, sourceHeight: proxy.Height,
-                sourceIdentityPath: proxyPath);
+                sourceIdentityPath: durableProxyPath);
             return GenerationResponse(job, 0);
         }
         catch (InvalidOperationException ex)
@@ -790,12 +785,51 @@ public class StudioService : IService, IRequiresRequest
             ? SceneCutSource.Capture(proxyPath)
             : null;
         var detection = SceneCutDetectionJobs.FindRunning(itemId);
-        if (detection != null) saved = detection.PartialDocument();
+        if (detection != null) saved = detection.PartialDocument().WithManualFrom(saved);
         var liveSeconds = item.RunTimeTicks is long ticks && ticks > 0
             ? ticks / (double)TimeSpan.TicksPerSecond
             : 0;
         return SceneCutApi.Response(itemId, saved, current, detection != null, liveSeconds);
     }
+
+    public object Post(PostStudioSceneMarker request) =>
+        EditSceneMarkers(request.ItemId, (document, durationSeconds) =>
+        {
+            var timeMs = SceneCutApi.RequireMarkerTime(request.TimeMs, durationSeconds);
+            var label = SceneCutApi.MarkerLabel(request.Label);
+            // Idempotent for the same manual marker (a retried request or a sidecar migration).
+            if (document.Markers.Any(marker => !marker.IsDetected && marker.TimeMs == timeMs && marker.Label == label))
+                return false;
+            document.Markers.Add(SceneMarkerEntry.CreateManual(timeMs, label));
+            return true;
+        });
+
+    public object Put(PutStudioSceneMarker request) =>
+        EditSceneMarkers(request.ItemId, (document, durationSeconds) =>
+        {
+            var marker = RequireSceneMarker(document, request.MarkerId);
+            var changed = false;
+            if (request.TimeMs != null)
+            {
+                var timeMs = SceneCutApi.RequireMarkerTime(request.TimeMs, durationSeconds);
+                changed |= marker.TimeMs != timeMs;
+                marker.TimeMs = timeMs;
+            }
+            if (request.Label != null)
+            {
+                var label = SceneCutApi.MarkerLabel(request.Label);
+                changed |= marker.Label != label;
+                marker.Label = label;
+            }
+            return changed;
+        }, request.MarkerId);
+
+    public object Delete(DeleteStudioSceneMarker request) =>
+        EditSceneMarkers(request.ItemId, (document, _) =>
+        {
+            var marker = RequireSceneMarker(document, request.MarkerId);
+            return document.Markers.Remove(marker);
+        }, request.MarkerId);
 
     public async Task<object> Post(PostStudioSceneCuts request)
     {
@@ -840,6 +874,35 @@ public class StudioService : IService, IRequiresRequest
             throw new ConflictException(ex.Message);
         }
     }
+
+    /// <summary>Apply one marker edit to the movie's scene-cut document and return the updated JSON.</summary>
+    private StudioSceneCutsResponse EditSceneMarkers(
+        string requestItemId,
+        Func<SceneCutDocument, double, bool> edit,
+        string? markerId = null)
+    {
+        var item = RequireItem(requestItemId);
+        var itemId = PublicItemId(item);
+        var liveSeconds = item.RunTimeTicks is long ticks && ticks > 0
+            ? ticks / (double)TimeSpan.TicksPerSecond
+            : 0;
+        var detection = SceneCutDetectionJobs.FindRunning(itemId);
+        // A finishing run replaces detected markers, so editing one now would be lost.
+        if (detection != null && markerId != null && !markerId.StartsWith("m", StringComparison.Ordinal))
+            throw new ConflictException("Wait for scene detection to finish before editing detected scene markers");
+        var saved = SceneCutStore.Open().Update(itemId, liveSeconds, document =>
+            edit(document, document.DurationSeconds > 0 ? document.DurationSeconds : liveSeconds));
+        var proxyPath = string.IsNullOrEmpty(item.Path) ? null : ProxyOutputPath(item);
+        var current = proxyPath != null && StudioProxyJob.IsComplete(proxyPath)
+            ? SceneCutSource.Capture(proxyPath)
+            : null;
+        var shown = detection != null ? detection.PartialDocument().WithManualFrom(saved) : saved;
+        return SceneCutApi.Response(itemId, shown, current, detection != null, liveSeconds);
+    }
+
+    private static SceneMarkerEntry RequireSceneMarker(SceneCutDocument document, string markerId) =>
+        document.Markers.FirstOrDefault(marker => string.Equals(marker.Id, markerId, StringComparison.Ordinal))
+        ?? throw new ResourceNotFoundException("Scene marker not found");
 
     public object Get(GetStudioSceneCutJob request)
     {
@@ -935,11 +998,16 @@ public class StudioService : IService, IRequiresRequest
         var item = RequireItem(request.ItemId);
         var itemId = PublicItemId(item);
         var workspace = StudioSourceWorkspace.Find(itemId);
-        var expectedOutput = workspace?.ProxyPath ?? ProxyOutputPath(item);
+        var expectedOutput = ResolveProxyOutputPath(item, workspace);
+        var outputComplete = expectedOutput != null && StudioProxyJob.IsComplete(expectedOutput);
         StudioProxyJob job;
-        if (StudioProxyCache.TryGet(itemId, out var cachedJob)
-            && PathsEqual(cachedJob.OutputPath, expectedOutput))
+        if (expectedOutput != null
+            && StudioProxyCache.TryGet(itemId, out var cachedJob)
+            && PathsEqual(cachedJob.OutputPath, expectedOutput)
+            && (cachedJob.State != "ready" || outputComplete))
         {
+            if (outputComplete && cachedJob.State != "ready")
+                cachedJob.MarkReady(cachedJob.EncodedThroughMs);
             job = cachedJob;
         }
         else
@@ -1231,7 +1299,46 @@ public class StudioService : IService, IRequiresRequest
             throw new ResourceNotFoundException("Project sidecar not found");
 
         var bytes = File.ReadAllBytes(path);
+        var (document, legacyMarkers) = StudioSidecar.ExtractSceneMarkers(bytes);
+        if (!ReferenceEquals(document, bytes))
+        {
+            MigrateSidecarSceneMarkers(item, legacyMarkers);
+            try
+            {
+                File.WriteAllBytes(path, document);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Re-importing on a later read is harmless: identical manual markers are not duplicated.
+                _logger.Warn("Could not remove migrated scene markers from '{0}': {1}", path, ex.Message);
+            }
+            bytes = document;
+        }
         return JsonResult(bytes);
+    }
+
+    /// <summary>Move markers from a pre-store sidecar into the movie's scene-cut document as manual markers.</summary>
+    private void MigrateSidecarSceneMarkers(BaseItem item, IReadOnlyList<(long TimeMs, string Label)> markers)
+    {
+        if (markers.Count == 0) return;
+        var liveSeconds = item.RunTimeTicks is long ticks && ticks > 0
+            ? ticks / (double)TimeSpan.TicksPerSecond
+            : 0;
+        var itemId = PublicItemId(item);
+        SceneCutStore.Open().Update(itemId, liveSeconds, document =>
+        {
+            var added = false;
+            foreach (var (timeMs, rawLabel) in markers)
+            {
+                var label = SceneCutApi.MarkerLabel(rawLabel);
+                if (document.Markers.Any(marker => !marker.IsDetected && marker.TimeMs == timeMs && marker.Label == label))
+                    continue;
+                document.Markers.Add(SceneMarkerEntry.CreateManual(timeMs, label));
+                added = true;
+            }
+            return added;
+        });
+        _logger.Info("Moved {0} scene marker(s) from a Studio sidecar into the scene markers for item {1}", markers.Count, itemId);
     }
 
     public async Task<object> Put(PutStudioProject request)
@@ -1520,28 +1627,54 @@ public class StudioService : IService, IRequiresRequest
             || Math.Abs(saved.Detector.Threshold - threshold) >= 0.0001;
     }
 
+    // Select one usable artifact for MediaInfo, range reads, and prefill: prefer a
+    // completed fast-workspace copy, then a completed durable copy. The optional source
+    // workspace only blocks encoding when neither copy exists yet.
+    private string? ResolveProxyOutputPath(BaseItem item, StudioSourceWorkspace? workspace)
+    {
+        var durableOutput = ProxyOutputPath(item);
+        var workspaceReady = workspace?.Snapshot().State == "ready";
+        if (workspaceReady && StudioProxyJob.IsComplete(workspace!.ProxyPath))
+            return workspace.ProxyPath;
+        if (StudioProxyJob.IsComplete(durableOutput))
+            return durableOutput;
+        if (workspaceReady)
+            return workspace!.ProxyPath;
+        return string.IsNullOrWhiteSpace(Plugin.Instance?.GetPluginOptions().TranscodeTempDirectory)
+            ? durableOutput
+            : null;
+    }
+
     private StudioProxyJob EnsureProxy(BaseItem item, StudioSourceInfo source)
     {
         var itemId = PublicItemId(item);
         var durableOutput = ProxyOutputPath(item);
         var workspace = StudioSourceWorkspace.Find(itemId);
-        var configuredTemp = Plugin.Instance?.GetPluginOptions().TranscodeTempDirectory;
-        if (!string.IsNullOrWhiteSpace(configuredTemp) && workspace?.Snapshot().State != "ready")
+        var output = ResolveProxyOutputPath(item, workspace);
+        if (output == null)
         {
             var size = OutputSize(source.Width, source.Height);
             return StudioProxyJob.Missing(itemId, source.Fps, size.Width, size.Height);
         }
-        var output = workspace?.ProxyPath ?? durableOutput;
-        if (StudioProxyCache.TryGet(itemId, out var cachedJob)
-            && !PathsEqual(cachedJob.OutputPath, output))
-            StudioProxyCache.Forget(itemId, deleteOutput: false);
+        if (StudioProxyCache.TryGet(itemId, out var cachedJob))
+        {
+            if (!PathsEqual(cachedJob.OutputPath, output))
+                StudioProxyCache.Forget(itemId, deleteOutput: false);
+            else if (StudioProxyJob.IsComplete(output))
+            {
+                cachedJob.MarkReady(source.RuntimeMs);
+                return cachedJob;
+            }
+            else if (cachedJob.State == "ready")
+                StudioProxyCache.Forget(itemId, deleteOutput: false);
+        }
         return StudioProxyCache.GetOrAdd(itemId, () =>
         {
             Directory.CreateDirectory(Path.GetDirectoryName(output)!);
             var (width, height) = OutputSize(source.Width, source.Height);
-            var saveProcessedProxy = workspace == null
-                ? null
-                : new Action(() => EnsureProxyIsSaved(output, durableOutput, itemId));
+            var saveProcessedProxy = workspace != null && !PathsEqual(output, durableOutput)
+                ? new Action(() => EnsureProxyIsSaved(output, durableOutput, itemId))
+                : null;
             var job = new StudioProxyJob(itemId, output, source.Fps, width, height, saveProcessedProxy);
             if (StudioProxyJob.IsComplete(output))
             {

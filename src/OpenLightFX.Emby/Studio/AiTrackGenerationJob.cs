@@ -181,7 +181,8 @@ public sealed class AiTrackGenerationJob
                 || sceneDocument.Status(SceneCutSource.Capture(_sourceIdentityPath), false) != "ready"
                 || Math.Abs(sceneDocument.Detector.Threshold - Options.SceneCutThreshold) >= 0.0001)
                 throw new InvalidOperationException("Scene cuts are not ready for this movie");
-            var storedCuts = sceneDocument.Cuts
+            // Every scene marker for the movie (detected, moved, and manual) bounds pre-fill scenes.
+            var storedCuts = sceneDocument.CutSeconds()
                 .Select(seconds => (int)Math.Round(seconds * AiTrackAnalysis.DetectionFps))
                 .ToHashSet();
             var filter = AiTrackAnalysis.CutFilter(videoStreamIndex, detectWidth, detectHeight, toneMap);
