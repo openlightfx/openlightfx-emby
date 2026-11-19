@@ -101,9 +101,12 @@ The plugin discovers `.lightfx` files using:
 | `/OpenLightFX/Studio/Items/{itemId}/StreamUrl` | GET | Browser-playable video URL |
 | `/OpenLightFX/Studio/Tracks?itemId=` | GET | List `.lightfx` tracks for a movie |
 | `/OpenLightFX/Studio/Tracks/{trackId}?itemId=` | GET, PUT | Read or save raw `.lightfx` bytes (PUT is admin-only) |
+| `/OpenLightFX/Studio/Items/{itemId}/ActiveTrack` | POST | Select a movie's track or disable lighting for all rooms (admin) |
 | `/OpenLightFX/Studio/Preview/Start` | POST | Start a live bulb preview (admin) |
 | `/OpenLightFX/Studio/Preview/Frame` | POST | Send a preview frame (admin) |
 | `/OpenLightFX/Studio/Preview/Stop` | POST | Stop preview and restore bulbs (admin) |
+
+For active-track selection, POST `{ "trackId": "..." }` or `{ "disabled": true }`. Both clear older device-specific selections. `GET /OpenLightFX/Tracks/ByItem` reports `globalSelectedTrack` as a file path for a selected track, an empty string for explicitly disabled lighting, or null when no choice has been made. An unselected movie may automatically choose a valid track when playback starts; disabled lighting does not. Changes take effect on the next playback start, not an already-running session.
 
 Studio's static editor is served at `/emby/OpenLightFX/studio/` (Emby also exposes the same route at `/OpenLightFX/studio/`). The dist should use relative asset URLs, or base `/emby/OpenLightFX/studio/`. The static shell and assets contain no user data and do not require a token. Studio reads Emby Web's same-origin `servercredentials3` credential and calls `GET /OpenLightFX/Studio/Session` with `X-Emby-Token`; the plugin validates it and returns the token with `Cache-Control: no-store` for in-memory use. The session endpoint can instead redeem the short-lived `olfx_studio_page` HttpOnly ticket when present. Users do not need an API key in the URL; `?api_key=` remains supported for direct/legacy access. Studio API calls use `X-Emby-Token`. Saving tracks and preview require an administrator. A `<video>` element cannot send that header, so `MediaInfo` and `POST .../Proxy` set the separate `olfx_studio_media` cookie and `editUrl` does not include `api_key`. Cookie tickets are random, in-memory, HttpOnly, `SameSite=Strict`, `Secure` over HTTPS (including `X-Forwarded-Proto: https`), expire after 8 hours, rotate after 4, and die with an Emby restart or when the token behind them is revoked. `StreamUrl` still appends the token because that URL is Emby's own video endpoint.
 

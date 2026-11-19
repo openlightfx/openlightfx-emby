@@ -170,6 +170,7 @@ public class PostStudioActiveTrack : IReturn<StudioActiveTrackResponse>
 {
     public string ItemId { get; set; } = "";
     public string TrackId { get; set; } = "";
+    public bool Disabled { get; set; }
     public string? ServerId { get; set; }
 }
 
@@ -1383,15 +1384,23 @@ public class StudioService : IService, IRequiresRequest
     {
         var entry = RequireEntry();
         if (string.IsNullOrWhiteSpace(request.ItemId)) throw new ArgumentException("itemId_required: A movie is required.");
-        if (!StudioTrackFiles.IsSafeTrackId(request.TrackId)) throw new ArgumentException("track_not_found: The selected track is not available.");
         var item = RequireItem(request.ItemId);
         var publicItemId = PublicItemId(item);
-        if (!entry.StudioTrackIndex.TryGet(request.TrackId, out var track) ||
-            !string.Equals(track.ItemId, publicItemId, StringComparison.Ordinal) ||
-            !File.Exists(track.FilePath))
-            throw new ResourceNotFoundException("track_not_found: The selected track is not available for this movie.");
-
-        entry.SelectionService.SetGlobalSelectionAndClearDeviceOverrides(publicItemId, track.FilePath);
+        if (request.Disabled)
+        {
+            if (!string.IsNullOrEmpty(request.TrackId))
+                throw new ArgumentException("track_selection_invalid: Choose a track or disable lighting, not both.");
+            entry.SelectionService.DisableGlobalSelection(publicItemId);
+        }
+        else
+        {
+            if (!StudioTrackFiles.IsSafeTrackId(request.TrackId)) throw new ArgumentException("track_not_found: The selected track is not available.");
+            if (!entry.StudioTrackIndex.TryGet(request.TrackId, out var track) ||
+                !string.Equals(track.ItemId, publicItemId, StringComparison.Ordinal) ||
+                !File.Exists(track.FilePath))
+                throw new ResourceNotFoundException("track_not_found: The selected track is not available for this movie.");
+            entry.SelectionService.SetGlobalSelectionAndClearDeviceOverrides(publicItemId, track.FilePath);
+        }
         var serverQuery = string.IsNullOrWhiteSpace(request.ServerId)
             ? string.Empty
             : $"&serverId={Uri.EscapeDataString(request.ServerId)}";

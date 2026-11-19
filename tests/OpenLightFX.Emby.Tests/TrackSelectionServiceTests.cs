@@ -129,6 +129,33 @@ public sealed class TrackSelectionServiceTests
         }
     }
 
+    [Fact(DisplayName = "WATCH-001 @unit None survives restart, clears overrides, and prevents automatic playback")]
+    public void Disabled_selection_is_persistent_and_never_auto_selects()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "olfx-selection-none-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var service = new TrackSelectionService(root);
+            service.SetSelectedTrack("movie", "/movie/old.lightfx", "device-a");
+            service.DisableGlobalSelection("movie");
+
+            var reloaded = new TrackSelectionService(root);
+            Assert.True(reloaded.IsPlaybackDisabled("movie", "device-a"));
+            Assert.Equal("", reloaded.GetGlobalSelectedTrack("movie"));
+            Assert.Null(reloaded.GetDeviceSelectedTrack("movie", "device-a"));
+            Assert.Null(reloaded.ResolveTrackForPlayback("movie", "device-a", new[] { CreateTrack("/movie/new.lightfx") }));
+            Assert.True(new TrackSelectionService(root).IsPlaybackDisabled("movie", "device-b"));
+
+            reloaded.SetGlobalSelectionAndClearDeviceOverrides("movie", "/movie/new.lightfx");
+            Assert.False(reloaded.IsPlaybackDisabled("movie", "device-a"));
+            Assert.Equal("/movie/new.lightfx", reloaded.ResolveTrackForPlayback("movie", "device-a", new[] { CreateTrack("/movie/new.lightfx") })?.FilePath);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     private static TrackInfo CreateTrack(string path, bool isValid = true) => new()
     {
         FilePath = path,

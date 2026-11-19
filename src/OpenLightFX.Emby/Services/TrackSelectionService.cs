@@ -61,6 +61,8 @@ public class TrackSelectionService
                 _selections.TryGetValue(deviceKey, out deviceSelection);
             _selections.TryGetValue(itemId, out var globalSelection);
             var selected = hasDeviceSelection ? deviceSelection : globalSelection;
+            if (selected?.Disabled == true)
+                return null;
 
             var selectedTrack = selected == null
                 ? null
@@ -82,7 +84,19 @@ public class TrackSelectionService
         }
     }
 
-    /// <summary>Get the global selected track path (no device scope).</summary>
+    /// <summary>Whether playback is explicitly disabled for this movie and device.</summary>
+    public bool IsPlaybackDisabled(string itemId, string? deviceId = null)
+    {
+        lock (_gate)
+        {
+            if (!string.IsNullOrEmpty(deviceId) &&
+                _selections.TryGetValue($"{itemId}:{deviceId}", out var deviceSelection))
+                return deviceSelection.Disabled;
+            return _selections.TryGetValue(itemId, out var selection) && selection.Disabled;
+        }
+    }
+
+    /// <summary>Get the global selected track path (no device scope). An empty path means disabled.</summary>
     public string? GetGlobalSelectedTrack(string itemId)
     {
         lock (_gate)
@@ -128,6 +142,25 @@ public class TrackSelectionService
             {
                 ItemId = itemId,
                 TrackPath = trackPath,
+                SelectedAt = DateTime.UtcNow
+            };
+            Save();
+        }
+    }
+
+    /// <summary>Disable lighting for this movie and clear legacy device overrides.</summary>
+    public void DisableGlobalSelection(string itemId)
+    {
+        lock (_gate)
+        {
+            foreach (var key in _selections.Keys
+                .Where(key => key.StartsWith(itemId + ":", StringComparison.Ordinal))
+                .ToArray())
+                _selections.Remove(key);
+            _selections[itemId] = new TrackSelection
+            {
+                ItemId = itemId,
+                Disabled = true,
                 SelectedAt = DateTime.UtcNow
             };
             Save();

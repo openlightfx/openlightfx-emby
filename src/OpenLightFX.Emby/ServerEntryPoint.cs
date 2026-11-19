@@ -298,6 +298,12 @@ public class ServerEntryPoint : IServerEntryPoint
             }
 
             var itemId = item.Id ?? string.Empty;
+            if (_selectionService.IsPlaybackDisabled(itemId, deviceId))
+            {
+                _logger.Info("Lighting is disabled for '{0}'", item.Name);
+                _noTrackSessions.TryAdd(sessionId, true);
+                return;
+            }
 
             string? imdbId = null;
             item.ProviderIds?.TryGetValue("Imdb", out imdbId);
@@ -320,6 +326,11 @@ public class ServerEntryPoint : IServerEntryPoint
             // points to a discovered valid track, activate a stable default instead of skipping.
             var selectedPath = _selectionService.GetSelectedTrack(itemId, deviceId);
             var trackInfo = _selectionService.ResolveTrackForPlayback(itemId, deviceId, tracks);
+            if (trackInfo == null && _selectionService.IsPlaybackDisabled(itemId, deviceId))
+            {
+                _noTrackSessions.TryAdd(sessionId, true);
+                return;
+            }
             if (trackInfo == null || !trackInfo.IsValid)
             {
                 _logger.Warn("No valid track for '{0}': {1}", item.Name,
