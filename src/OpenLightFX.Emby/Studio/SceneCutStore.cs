@@ -7,8 +7,8 @@ namespace OpenLightFX.Emby.Studio;
 /// <summary>
 /// One movie's saved ContentDetector cuts. The file is
 /// <c>{plugin data}/OpenLightFX/scene-cuts/{itemId}.json</c>.
-/// <c>source</c> is the media file's path, size, and UTC mtime so a later open can tell the
-/// result is stale. <c>detector.version</c> is <see cref="ContentDetector.PersistenceVersion"/>.
+/// <c>source</c> is the completed edit proxy's path, size, and UTC mtime so a later open can tell
+/// the result is stale. <c>detector.version</c> is <see cref="ContentDetector.PersistenceVersion"/>.
 /// </summary>
 public sealed class SceneCutDocument
 {

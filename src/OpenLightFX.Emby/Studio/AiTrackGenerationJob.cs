@@ -122,21 +122,17 @@ public sealed class AiTrackGenerationJob
     private readonly int _sourceWidth;
     private readonly int _sourceHeight;
     private readonly string _sourceIdentityPath;
-    private readonly string _colorSourcePath;
-    private readonly int _colorVideoStreamIndex;
     private string _state = "pending";
     private string _error = "";
     private double _progress;
     private long _throughMs;
 
-    public AiTrackGenerationJob(string id, string itemId, string videoPath, string sourceIdentityPath, string colorSourcePath, int colorVideoStreamIndex, long durationMs, AiTrackGenerationOptions options, int sourceWidth, int sourceHeight)
+    public AiTrackGenerationJob(string id, string itemId, string videoPath, string sourceIdentityPath, long durationMs, AiTrackGenerationOptions options, int sourceWidth, int sourceHeight)
     {
         Id = id;
         ItemId = itemId;
         VideoPath = videoPath;
         _sourceIdentityPath = sourceIdentityPath;
-        _colorSourcePath = colorSourcePath;
-        _colorVideoStreamIndex = colorVideoStreamIndex;
         DurationMs = durationMs;
         Options = options;
         _sourceWidth = sourceWidth;
@@ -195,22 +191,36 @@ public sealed class AiTrackGenerationJob
             var stderrTask = process.StandardError.ReadToEndAsync();
             var cutFrame = new byte[detectWidth * detectHeight * 3];
             var prefill = new EffectPrefill();
+            var detectLightning = Targets(Options.LightningChannels).Count > 0;
+            var detectSiren = Targets(Options.SirenChannels).Count > 0;
+            var analyzeFrames = Options.Fades || detectLightning || detectSiren;
             var cutIndex = 0;
             var sceneStart = 0;
             var opening = true;
             var idPrefix = Id.Length >= 8 ? Id[..8] : Id;
+            var lastFrame = new byte[cutFrame.Length];
+            var hasLastFrame = false;
+            byte[]? sceneColorFrame = null;
 
             while (await ReadFrameAsync(process.StandardOutput.BaseStream, cutFrame).ConfigureAwait(false))
             {
-                prefill.Observe(cutFrame, detectWidth, detectHeight);
+                if (analyzeFrames)
+                    prefill.Observe(cutFrame, detectWidth, detectHeight, detectLightning, detectSiren);
                 if (storedCuts.Contains(cutIndex) && cutIndex > sceneStart)
                 {
-                    var colors = await ExtractSceneColorsAsync(ffmpegPath, sceneStart, cutIndex, hdr, colorTransfer, zscale, _colorVideoStreamIndex).ConfigureAwait(false);
+                    var colors = SceneColors(sceneColorFrame ?? (hasLastFrame ? lastFrame : cutFrame), detectWidth, detectHeight);
                     EmitScene(colors, prefill, idPrefix, sceneStart, cutIndex, opening);
                     opening = false;
                     sceneStart = cutIndex;
+                    sceneColorFrame = null;
+                }
+                else if (cutIndex == sceneStart + SceneSampling.SkipFrames)
+                {
+                    sceneColorFrame = cutFrame.ToArray();
                 }
 
+                Buffer.BlockCopy(cutFrame, 0, lastFrame, 0, cutFrame.Length);
+                hasLastFrame = true;
                 var timeMs = AiTrackAnalysis.FrameTimeMs(cutIndex, AiTrackAnalysis.DetectionFps);
                 lock (_gate)
                 {
@@ -224,9 +234,9 @@ public sealed class AiTrackGenerationJob
             var stderr = await stderrTask.ConfigureAwait(false);
             if (process.ExitCode != 0)
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "ffmpeg could not analyze the movie" : "ffmpeg could not analyze the movie");
-            if (cutIndex > sceneStart)
+            if (cutIndex > sceneStart && hasLastFrame)
             {
-                var colors = await ExtractSceneColorsAsync(ffmpegPath, sceneStart, cutIndex, hdr, colorTransfer, zscale, _colorVideoStreamIndex).ConfigureAwait(false);
+                var colors = SceneColors(sceneColorFrame ?? lastFrame, detectWidth, detectHeight);
                 EmitScene(colors, prefill, idPrefix, sceneStart, cutIndex, opening);
             }
             var cutFrames = storedCuts.Order().ToList();
@@ -257,26 +267,44 @@ public sealed class AiTrackGenerationJob
         }
     }
 
-    private async Task<Dictionary<string, (byte R, byte G, byte B)>> ExtractSceneColorsAsync(
-        string ffmpegPath, int sceneStart, int sceneEnd, bool hdr, string? colorTransfer, bool zscale, int videoStreamIndex)
+    private Dictionary<string, (byte R, byte G, byte B)> SceneColors(ReadOnlySpan<byte> rgb, int width, int height)
     {
-        var frame = Math.Min(sceneEnd - 1, sceneStart + SceneSampling.SkipFrames);
-        var seconds = (frame / AiTrackAnalysis.DetectionFps).ToString("0.###", CultureInfo.InvariantCulture);
-        var toneMap = AiTrackAnalysis.ToneMap(hdr, colorTransfer, zscale);
-        var filter = $"{toneMap}scale={AiTrackAnalysis.ColorWidth}:{AiTrackAnalysis.ColorHeight}:flags=bilinear,format=rgb24";
-        var args = new[]
-        {
-            "-hide_banner", "-loglevel", "error", "-ss", seconds, "-i", _colorSourcePath,
-            "-map", $"0:{videoStreamIndex}", "-frames:v", "1", "-vf", filter,
-            "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"
-        };
-        var (code, bytes, _) = await StudioProcess.RunAsync(ffmpegPath, args, CancellationToken.None).ConfigureAwait(false);
-        if (code != 0 || bytes.Length < AiTrackAnalysis.ColorWidth * AiTrackAnalysis.ColorHeight * 3)
-            throw new InvalidOperationException("Could not sample a scene frame from the original movie");
+        var colorFrame = ResizeRgb24(rgb, width, height, AiTrackAnalysis.ColorWidth, AiTrackAnalysis.ColorHeight);
         var colors = new Dictionary<string, (byte R, byte G, byte B)>(StringComparer.Ordinal);
         foreach (var zone in Options.Zones)
-            colors[zone.ChannelId] = ZoneColor.Dominant(bytes, AiTrackAnalysis.ColorWidth, AiTrackAnalysis.ColorHeight, zone, Options.CenterExclusionPercent);
+            colors[zone.ChannelId] = ZoneColor.Dominant(colorFrame, AiTrackAnalysis.ColorWidth, AiTrackAnalysis.ColorHeight, zone, Options.CenterExclusionPercent);
         return colors;
+    }
+
+    private static byte[] ResizeRgb24(ReadOnlySpan<byte> source, int sourceWidth, int sourceHeight, int width, int height)
+    {
+        var resized = new byte[width * height * 3];
+        for (var y = 0; y < height; y++)
+        {
+            var sourceY = Math.Clamp((y + 0.5) * sourceHeight / height - 0.5, 0, sourceHeight - 1);
+            var y0 = (int)sourceY;
+            var y1 = Math.Min(y0 + 1, sourceHeight - 1);
+            var wy = sourceY - y0;
+            for (var x = 0; x < width; x++)
+            {
+                var sourceX = Math.Clamp((x + 0.5) * sourceWidth / width - 0.5, 0, sourceWidth - 1);
+                var x0 = (int)sourceX;
+                var x1 = Math.Min(x0 + 1, sourceWidth - 1);
+                var wx = sourceX - x0;
+                var destination = (y * width + x) * 3;
+                var topLeft = (y0 * sourceWidth + x0) * 3;
+                var topRight = (y0 * sourceWidth + x1) * 3;
+                var bottomLeft = (y1 * sourceWidth + x0) * 3;
+                var bottomRight = (y1 * sourceWidth + x1) * 3;
+                for (var channel = 0; channel < 3; channel++)
+                {
+                    var top = source[topLeft + channel] * (1 - wx) + source[topRight + channel] * wx;
+                    var bottom = source[bottomLeft + channel] * (1 - wx) + source[bottomRight + channel] * wx;
+                    resized[destination + channel] = (byte)Math.Clamp((int)Math.Round(top * (1 - wy) + bottom * wy), 0, 255);
+                }
+            }
+        }
+        return resized;
     }
 
     private void EmitScene(Dictionary<string, (byte R, byte G, byte B)> sceneColors, EffectPrefill prefill, string idPrefix, int sceneStart, int sceneEnd, bool opening)
@@ -502,7 +530,7 @@ public static class AiTrackGenerationJobs
 
     public static AiTrackGenerationJob Start(string itemId, string videoPath, long durationMs, AiTrackGenerationOptions options,
         string ffmpegPath, bool hdr, string? transfer, bool zscale, int videoStreamIndex, int sourceWidth, int sourceHeight,
-        string? sourceIdentityPath = null, string? colorSourcePath = null, int? colorVideoStreamIndex = null)
+        string? sourceIdentityPath = null)
     {
         if (ActiveByItem.TryGetValue(itemId, out var previousId)
             && Jobs.TryGetValue(previousId, out var previous)
@@ -510,7 +538,7 @@ public static class AiTrackGenerationJobs
             ActiveByItem.TryRemove(itemId, out _);
 
         var id = Guid.NewGuid().ToString("N");
-        var job = new AiTrackGenerationJob(id, itemId, videoPath, sourceIdentityPath ?? videoPath, colorSourcePath ?? sourceIdentityPath ?? videoPath, colorVideoStreamIndex ?? videoStreamIndex, durationMs, options, sourceWidth, sourceHeight);
+        var job = new AiTrackGenerationJob(id, itemId, videoPath, sourceIdentityPath ?? videoPath, durationMs, options, sourceWidth, sourceHeight);
         if (!ActiveByItem.TryAdd(itemId, id))
             throw new InvalidOperationException("Keyframe generation is already running for this movie");
         Jobs[id] = job;

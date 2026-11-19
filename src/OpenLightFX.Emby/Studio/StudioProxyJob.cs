@@ -118,88 +118,97 @@ public sealed class StudioProxyJob
     public void StartWithFallbacks(
         string ffmpegPath,
         IReadOnlyList<string> arguments,
-        IReadOnlyList<IReadOnlyList<string>> fallbackArguments) =>
-        StartAttempt(ffmpegPath, arguments, fallbackArguments, 0);
+        IReadOnlyList<IReadOnlyList<string>> fallbackArguments,
+        SceneCutDetectionJob? sceneCuts = null)
+    {
+        sceneCuts?.BeginProxyStream();
+        StartAttempt(ffmpegPath, arguments, fallbackArguments, 0, sceneCuts);
+    }
 
     private void StartAttempt(
         string ffmpegPath,
         IReadOnlyList<string> arguments,
         IReadOnlyList<IReadOnlyList<string>> fallbackArguments,
-        int fallbackIndex)
+        int fallbackIndex,
+        SceneCutDetectionJob? sceneCuts)
     {
-        var process = new Process
-        {
-            StartInfo = StudioProcess.StartInfo(ffmpegPath, arguments),
-            EnableRaisingEvents = true
-        };
-        process.ErrorDataReceived += (_, args) =>
-        {
-            if (args.Data != null && StudioFfmpegProgress.TryReadEncodedMs(args.Data, out var ms))
-                NoteProgress(ms);
-        };
-        process.Exited += (_, _) =>
-        {
-            var exitCode = -1;
-            try { exitCode = process.ExitCode; } catch { }
-            process.Dispose();
+        _ = RunAttemptAsync(ffmpegPath, arguments, fallbackArguments, fallbackIndex, sceneCuts);
+    }
 
-            if (exitCode != 0 && fallbackIndex < fallbackArguments.Count)
-            {
-                // CUDA decode/scale, NVENC with CPU scaling, then software encoding
-                // are attempted in order to accommodate different FFmpeg/driver builds.
-                DiscardPartial(OutputPath);
-                Interlocked.Exchange(ref _encodedThroughMs, 0);
-                StartAttempt(ffmpegPath, fallbackArguments[fallbackIndex], fallbackArguments, fallbackIndex + 1);
-                return;
-            }
-
-            try
-            {
-                if (exitCode == 0 && File.Exists(OutputPath))
-                {
-                    File.WriteAllText(CompleteMarkerPath, StudioProxyPlan.CacheVersion);
-                    _onReady?.Invoke();
-                    MarkReady(Math.Max(EncodedThroughMs, 0));
-                }
-                else
-                    MarkFailed($"ffmpeg exited with code {exitCode}");
-            }
-            catch
-            {
-                MarkFailed("ffmpeg exited with code unknown");
-            }
-        };
-
+    private async Task RunAttemptAsync(
+        string ffmpegPath,
+        IReadOnlyList<string> arguments,
+        IReadOnlyList<IReadOnlyList<string>> fallbackArguments,
+        int fallbackIndex,
+        SceneCutDetectionJob? sceneCuts)
+    {
+        var exitCode = -1;
+        Process? process = null;
+        Task? stdoutTask = null;
         try
         {
-            if (!process.Start())
+            process = new Process { StartInfo = StudioProcess.StartInfo(ffmpegPath, arguments) };
+            process.ErrorDataReceived += (_, args) =>
             {
-                process.Dispose();
-                if (fallbackIndex < fallbackArguments.Count)
-                {
-                    DiscardPartial(OutputPath);
-                    Interlocked.Exchange(ref _encodedThroughMs, 0);
-                    StartAttempt(ffmpegPath, fallbackArguments[fallbackIndex], fallbackArguments, fallbackIndex + 1);
-                }
-                else
-                    MarkFailed("ffmpeg failed to start");
-                return;
-            }
-
+                if (args.Data != null && StudioFfmpegProgress.TryReadEncodedMs(args.Data, out var ms))
+                    NoteProgress(ms);
+            };
+            if (!process.Start()) throw new InvalidOperationException("ffmpeg failed to start");
             process.BeginErrorReadLine();
-            process.BeginOutputReadLine();
+            stdoutTask = sceneCuts == null
+                ? process.StandardOutput.BaseStream.CopyToAsync(Stream.Null)
+                : sceneCuts.ConsumeProxyFramesAsync(process.StandardOutput.BaseStream);
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            await stdoutTask.ConfigureAwait(false);
+            exitCode = process.ExitCode;
         }
         catch
         {
-            process.Dispose();
-            if (fallbackIndex < fallbackArguments.Count)
+            if (process is { HasExited: false })
             {
-                DiscardPartial(OutputPath);
-                Interlocked.Exchange(ref _encodedThroughMs, 0);
-                StartAttempt(ffmpegPath, fallbackArguments[fallbackIndex], fallbackArguments, fallbackIndex + 1);
+                try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+                try { await process.WaitForExitAsync().ConfigureAwait(false); } catch (InvalidOperationException) { }
+            }
+            if (stdoutTask != null)
+            {
+                try { await stdoutTask.ConfigureAwait(false); } catch { }
+            }
+        }
+        finally
+        {
+            process?.Dispose();
+        }
+
+        if (exitCode != 0 && fallbackIndex < fallbackArguments.Count)
+        {
+            // CUDA decode/scale, NVENC with CPU scaling, then software encoding
+            // are attempted in order to accommodate different FFmpeg/driver builds.
+            DiscardPartial(OutputPath);
+            Interlocked.Exchange(ref _encodedThroughMs, 0);
+            sceneCuts?.ResetProxyAttempt();
+            StartAttempt(ffmpegPath, fallbackArguments[fallbackIndex], fallbackArguments, fallbackIndex + 1, sceneCuts);
+            return;
+        }
+
+        try
+        {
+            if (exitCode == 0 && File.Exists(OutputPath))
+            {
+                File.WriteAllText(CompleteMarkerPath, StudioProxyPlan.CacheVersion);
+                _onReady?.Invoke();
+                sceneCuts?.CompleteProxyStream(success: true);
+                MarkReady(Math.Max(EncodedThroughMs, 0));
             }
             else
-                MarkFailed("ffmpeg failed to start");
+            {
+                sceneCuts?.CompleteProxyStream(success: false);
+                MarkFailed($"ffmpeg exited with code {exitCode}");
+            }
+        }
+        catch
+        {
+            sceneCuts?.CompleteProxyStream(success: false);
+            MarkFailed("ffmpeg exited with code unknown");
         }
     }
 
@@ -213,45 +222,57 @@ public sealed class StudioProxyJob
 
 public static class StudioProxyCache
 {
+    private static readonly object Gate = new();
     private static readonly ConcurrentDictionary<string, StudioProxyJob> Jobs = new(StringComparer.OrdinalIgnoreCase);
 
-    public static StudioProxyJob GetOrAdd(string itemId, Func<StudioProxyJob> create) =>
-        Jobs.GetOrAdd(itemId, _ => create());
+    public static StudioProxyJob GetOrAdd(string itemId, Func<StudioProxyJob> create)
+    {
+        lock (Gate)
+        {
+            if (Jobs.TryGetValue(itemId, out var existing)) return existing;
+            var job = create();
+            Jobs[itemId] = job;
+            return job;
+        }
+    }
 
     public static bool TryGet(string itemId, out StudioProxyJob job) => Jobs.TryGetValue(itemId, out job!);
 
     public static void Forget(string itemId, bool deleteOutput = true)
     {
-        if (!Jobs.TryRemove(itemId, out var job))
-            return;
-        if (!deleteOutput) return;
-        try
+        lock (Gate)
         {
-            if (File.Exists(job.CompleteMarkerPath))
-                File.Delete(job.CompleteMarkerPath);
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
-        // A partial file would be treated as a finished proxy on the next build.
-        if (!File.Exists(job.OutputPath))
-            return;
-        try
-        {
-            File.Delete(job.OutputPath);
-        }
-        catch (IOException)
-        {
-            var aside = job.OutputPath + ".failed-" + Guid.NewGuid().ToString("N");
-            try { File.Move(job.OutputPath, aside); } catch { /* ffmpeg -y overwrites what it can */ }
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // The next ffmpeg invocation uses -y. Leaving the partial file would mark the
-            // retry ready without encoding, so a failed delete is logged by the caller.
+            if (!Jobs.TryRemove(itemId, out var job))
+                return;
+            if (!deleteOutput) return;
+            try
+            {
+                if (File.Exists(job.CompleteMarkerPath))
+                    File.Delete(job.CompleteMarkerPath);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            // A partial file would be treated as a finished proxy on the next build.
+            if (!File.Exists(job.OutputPath))
+                return;
+            try
+            {
+                File.Delete(job.OutputPath);
+            }
+            catch (IOException)
+            {
+                var aside = job.OutputPath + ".failed-" + Guid.NewGuid().ToString("N");
+                try { File.Move(job.OutputPath, aside); } catch { /* ffmpeg -y overwrites what it can */ }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // The next ffmpeg invocation uses -y. Leaving the partial file would mark the
+                // retry ready without encoding, so a failed delete is logged by the caller.
+            }
         }
     }
 }

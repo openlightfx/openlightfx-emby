@@ -150,7 +150,10 @@ public static class StudioProxyPlan
         int? videoStreamIndex = null,
         bool useGpuEncoder = false,
         bool useCudaPipeline = false,
-        bool useHardwareDecode = true)
+        bool useHardwareDecode = true,
+        bool includeSceneDetection = false,
+        int detectionWidth = 256,
+        int detectionHeight = 144)
     {
         var gop = GopFrames(fps);
         var scale = useCudaPipeline
@@ -168,14 +171,26 @@ public static class StudioProxyPlan
             args.AddRange(new[] { "-hwaccel", "cuda", "-hwaccel_output_format", "cuda" });
         else if (useHardwareDecode)
             args.AddRange(new[] { "-hwaccel", "auto" });
-        args.AddRange(new[]
+        args.AddRange(new[] { "-i", inputPath });
+        if (includeSceneDetection)
         {
-            "-i", inputPath,
-            "-map", videoStreamIndex is int index ? $"0:{index}" : "0:v:0",
-            "-map", "0:a:0?",
-            "-vf", scale,
-            "-c:v", useGpuEncoder ? "h264_nvenc" : "libx264",
-        });
+            var stream = videoStreamIndex is int index ? $"0:{index}" : "0:v:0";
+            var detect = $"fps=24,scale={detectionWidth}:{detectionHeight}:flags=bilinear,format=rgb24";
+            var graph = useCudaPipeline
+                ? $"[{stream}]{scale}[scaled];[scaled]split=2[proxy][detectin];[detectin]hwdownload,format=nv12,{detect}[cut]"
+                : $"[{stream}]{scale},format=yuv420p[scaled];[scaled]split=2[proxy][detectin];[detectin]{detect}[cut]";
+            args.AddRange(new[] { "-filter_complex", graph, "-map", "[proxy]", "-map", "0:a:0?" });
+        }
+        else
+        {
+            args.AddRange(new[]
+            {
+                "-map", videoStreamIndex is int index ? $"0:{index}" : "0:v:0",
+                "-map", "0:a:0?",
+                "-vf", scale
+            });
+        }
+        args.AddRange(new[] { "-c:v", useGpuEncoder ? "h264_nvenc" : "libx264" });
         if (!useCudaPipeline)
             args.AddRange(new[] { "-pix_fmt", "yuv420p" });
         args.AddRange(new[]
@@ -215,6 +230,8 @@ public static class StudioProxyPlan
             "-nostats",
             outputPath
         });
+        if (includeSceneDetection)
+            args.AddRange(new[] { "-map", "[cut]", "-an", "-c:v", "rawvideo", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1" });
         return args;
     }
 

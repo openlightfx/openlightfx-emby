@@ -108,12 +108,13 @@ public static class SceneCutApi
             };
         }
 
+        var status = saved.Status(current, running);
         return new StudioSceneCutsResponse
         {
             ItemId = itemId,
-            Status = saved.Status(current, running),
+            Status = status,
             DurationSeconds = saved.DurationSeconds,
-            Cuts = saved.Cuts.ToList(),
+            Cuts = status == "stale" ? new List<double>() : saved.Cuts.ToList(),
             UpdatedAt = saved.UpdatedAt,
             Detector = new StudioSceneCutDetectorResponse
             {

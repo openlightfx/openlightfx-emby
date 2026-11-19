@@ -24,7 +24,7 @@ public sealed class EffectPrefill
 
     public int FrameCount => _luma.Count;
 
-    public void Observe(ReadOnlySpan<byte> rgb, int width, int height)
+    public void Observe(ReadOnlySpan<byte> rgb, int width, int height, bool detectLightning = true, bool detectSiren = true)
     {
         if (width <= 0 || height <= 0 || rgb.Length < width * height * 3)
         {
@@ -46,12 +46,18 @@ public sealed class EffectPrefill
             int r = rgb[offset];
             int g = rgb[offset + 1];
             int b = rgb[offset + 2];
-            var max = Math.Max(r, Math.Max(g, b));
-            var min = Math.Min(r, Math.Min(g, b));
             luma += (299 * r + 587 * g + 114 * b) / 1000;
-            chroma += max - min;
-            if (r > 80 && r > g + 40 && r > b + 40) red++;
-            else if (b > 80 && b > r + 40 && b > g + 40) blue++;
+            if (detectLightning)
+            {
+                var max = Math.Max(r, Math.Max(g, b));
+                var min = Math.Min(r, Math.Min(g, b));
+                chroma += max - min;
+            }
+            if (detectSiren)
+            {
+                if (r > 80 && r > g + 40 && r > b + 40) red++;
+                else if (b > 80 && b > r + 40 && b > g + 40) blue++;
+            }
         }
 
         _luma.Add(luma / (float)pixels);
